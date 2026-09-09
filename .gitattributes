@@ -1,0 +1,15 @@
+# Fins de ligne normalisées.
+#
+# Windows écrit CRLF, le reste du monde LF. Sans cette règle, un fichier
+# ouvert sur une autre machine peut apparaître modifié de bout en bout alors
+# que rien n'a changé. On stocke donc tout en LF dans le dépôt, chaque poste
+# retrouvant sa convention à l'extraction.
+* text=auto eol=lf
+
+# Fichiers binaires : jamais de conversion, elle les corromprait.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.ttf binary
+*.pdf binary
