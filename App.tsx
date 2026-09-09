@@ -1,20 +1,456 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { BackHandler } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { IntroScreen, RestorableSummary } from './src/screens/IntroScreen';
+import { ThemeSelectScreen } from './src/screens/ThemeSelectScreen';
+import { SwipeScreen } from './src/screens/SwipeScreen';
+import { ReviewScreen } from './src/screens/ReviewScreen';
+import { ResultsScreen } from './src/screens/ResultsScreen';
+import { HowItWorksScreen } from './src/screens/HowItWorksScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { ScreenTransition } from './src/components/ScreenTransition';
+import { SwipeDirection } from './src/components/SwipeCard';
+import { Answers, Proposal } from './src/types';
+import { PROPOSALS, PROPOSALS_BY_ID } from './src/data/proposals';
+import { CANDIDATES } from './src/data/candidates';
+import { THEMES, THEMES_BY_ID } from './src/data/themes';
+import { buildDeck, QUOTA_PAR_CANDIDAT } from './src/utils/deck';
+import { computeResults, pickTopMatch, topMatches } from './src/utils/scoring';
+import {
+  clearSession,
+  hasSeenTutorial,
+  loadSession,
+  markTutorialSeen,
+  resetAllData,
+  saveSession,
+  StoredSession,
+} from './src/utils/storage';
+import { ThemeProvider, useColors, useThemeSettings } from './src/theme/ThemeContext';
+import { DEFAULT_ACCENT_ID } from './src/theme';
+
+type Screen =
+  // Écran d'attente du tout premier rendu, le temps de savoir s'il y a une
+  // session à reprendre. Il ne peint que le fond : sans lui, l'accueil
+  // apparaîtrait un instant avant d'être remplacé par le paquet en cours.
+  | 'booting'
+  | 'intro'
+  | 'themes'
+  | 'swipe'
+  | 'review'
+  | 'results'
+  | 'howItWorks'
+  | 'settings';
+
+const ALL_THEME_IDS = THEMES.map((t) => t.id);
+
+function resolveProposals(ids: string[]): Proposal[] {
+  return ids.map((id) => PROPOSALS_BY_ID[id]).filter((p): p is Proposal => Boolean(p));
+}
 
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <ThemeProvider>
+      <AppInner />
+    </ThemeProvider>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+function AppInner() {
+  const colors = useColors();
+  const {
+    effectiveScheme,
+    setSchemePreference,
+    setAccentId,
+    setHapticsEnabled,
+    setRainbowUnlocked,
+  } = useThemeSettings();
+
+  const [screen, setScreen] = useState<Screen>('booting');
+  const [howItWorksReturnTo, setHowItWorksReturnTo] = useState<Screen>('intro');
+  const [settingsReturnTo, setSettingsReturnTo] = useState<Screen>('intro');
+  const [themesReturnTo, setThemesReturnTo] = useState<Screen>('intro');
+  const [selectedThemeIds, setSelectedThemeIds] = useState<string[]>(ALL_THEME_IDS);
+  const [sessionProposals, setSessionProposals] = useState<Proposal[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answers, setAnswers] = useState<Answers>({});
+
+  // Résumé de la session enregistrée au lancement de l'app. Dès qu'une session
+  // est en cours en mémoire, c'est elle qui fait foi (voir `restorable`).
+  const [storedRestorable, setStoredRestorable] = useState<RestorableSummary | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<StoredSession | null>(null);
+
+  const [showTutorial, setShowTutorial] = useState(false);
+  // Le "moment de révélation" (haptique + animations) de l'écran de résultat
+  // ne doit jouer qu'une fois par résultat, pas à chaque retour sur l'écran
+  // (ex. après avoir ouvert l'explorateur ou "Comment ça marche").
+  const [resultsRevealed, setResultsRevealed] = useState(false);
+
+  useEffect(() => {
+    const handler = () => {
+      if (screen === 'settings') {
+        setScreen(settingsReturnTo);
+        return true;
+      }
+      if (screen === 'howItWorks') {
+        setScreen(howItWorksReturnTo);
+        return true;
+      }
+      if (screen === 'themes') {
+        setScreen(themesReturnTo);
+        return true;
+      }
+      if (screen === 'results') {
+        // Symétrique au bouton retour visible sur cet écran : on revient à la
+        // révision des réponses, pas à l'accueil (rien n'est perdu).
+        setScreen('review');
+        return true;
+      }
+      if (screen === 'review') {
+        // Symétrique au bouton retour visible de cet écran.
+        setScreen('swipe');
+        return true;
+      }
+      if (screen === 'swipe') {
+        // Pas de perte de données : la session est déjà persistée à chaque
+        // réponse, donc revenir à l'accueil laisse la carte "Reprendre"
+        // disponible plutôt que de fermer l'app.
+        setScreen('intro');
+        return true;
+      }
+      // Écran racine (accueil) : on laisse le comportement par défaut du
+      // système (quitter l'app), comme c'est la convention Android.
+      return false;
+    };
+    const subscription = BackHandler.addEventListener('hardwareBackPress', handler);
+    return () => subscription.remove();
+  }, [screen, howItWorksReturnTo, settingsReturnTo, themesReturnTo]);
+
+  // Au lancement, on ne passe PAS par l'accueil quand une partie est en cours.
+  //
+  // L'accueil est un point de départ, pas un point de reprise : y revenir à
+  // chaque ouverture obligeait à retrouver la carte « Reprendre » avant de
+  // pouvoir enchaîner une carte, alors que quitter l'app en plein paquet est
+  // le cas normal — on swipe quelques minutes, on ferme, on y revient. On
+  // reprend donc là où la session s'est arrêtée, et l'accueil reste à un
+  // toucher (icône maison en haut à gauche).
+  useEffect(() => {
+    loadSession().then((session) => {
+      if (!session) {
+        setScreen('intro');
+        return;
+      }
+      const proposals = resolveProposals(session.proposalIds);
+      if (proposals.length === 0) {
+        setScreen('intro');
+        return;
+      }
+
+      const isComplete = session.currentIndex >= proposals.length;
+      let topCandidateName: string | undefined;
+      let topPct: number | undefined;
+      let topCount: number | undefined;
+      if (isComplete) {
+        const classement = computeResults(session.answers, proposals, CANDIDATES);
+        const top = pickTopMatch(classement);
+        topCandidateName = top?.candidate.name;
+        topPct = top?.pct;
+        topCount = topMatches(classement).length;
+      }
+
+      setPendingRestore(session);
+      setStoredRestorable({
+        currentIndex: session.currentIndex,
+        total: proposals.length,
+        isComplete,
+        topCandidateName,
+        topPct,
+        topCount,
+      });
+
+      // Même remise en état que « Reprendre », jouée d'office.
+      setSelectedThemeIds(session.selectedThemeIds);
+      setSessionProposals(proposals);
+      setCurrentIndex(session.currentIndex);
+      setAnswers(session.answers);
+      // Un paquet déjà terminé rouvre sur son résultat, et sans rejouer la
+      // révélation : ce moment appartient à la fois où le paquet s'est
+      // terminé, pas à chaque ouverture de l'app.
+      setResultsRevealed(isComplete);
+      setScreen(isComplete ? 'results' : 'swipe');
+    });
+
+    hasSeenTutorial().then((seen) => setShowTutorial(!seen));
+  }, []);
+
+  // Une session démarrée pendant cette exécution de l'app reste "reprenable"
+  // tant qu'elle n'a pas été explicitement effacée. Sans ce calcul, revenir à
+  // l'accueil (bouton retour Android depuis le swipe, ou après un détour par
+  // l'onglet Classement) faisait disparaître le bouton "Reprendre" : la
+  // progression semblait perdue, et "Commencer" l'écrasait pour de bon.
+  const liveRestorable = useMemo<RestorableSummary | null>(() => {
+    if (sessionProposals.length === 0) return null;
+    const isComplete = currentIndex >= sessionProposals.length;
+    if (!isComplete) {
+      return { currentIndex, total: sessionProposals.length, isComplete: false };
+    }
+    const classement = computeResults(answers, sessionProposals, CANDIDATES);
+    const top = pickTopMatch(classement);
+    return {
+      currentIndex,
+      total: sessionProposals.length,
+      isComplete: true,
+      topCandidateName: top?.candidate.name,
+      topPct: top?.pct,
+      topCount: topMatches(classement).length,
+    };
+  }, [sessionProposals, currentIndex, answers]);
+
+  const restorable = liveRestorable ?? storedRestorable;
+
+  const persist = (
+    currentIndexToSave: number,
+    answersToSave: Answers,
+    proposalsToSave: Proposal[],
+    themeIds: string[]
+  ) => {
+    saveSession({
+      selectedThemeIds: themeIds,
+      proposalIds: proposalsToSave.map((p) => p.id),
+      currentIndex: currentIndexToSave,
+      answers: answersToSave,
+    });
+  };
+
+  // Le swipe sur l'ensemble des propositions est le cœur de l'app : "Commencer"
+  // y va directement, sans passer par la sélection des thèmes. Choisir des
+  // thèmes en particulier reste possible, mais comme une option secondaire
+  // (voir `handleCustomizeThemes`), pas comme une étape imposée.
+  const startSession = (themeIds: string[]) => {
+    // Le paquet est TIRÉ du vivier embarqué, il ne l'est pas tout entier :
+    // l'app connaît environ deux fois plus de propositions qu'une partie n'en
+    // montre, pour qu'un deuxième passage apporte des cartes neuves. Le
+    // tirage garantit le même nombre par candidat, sans quoi le score serait
+    // faussé (voir utils/deck.ts).
+    const filtered = PROPOSALS.filter((p) => themeIds.includes(p.themeId));
+    const order = buildDeck(filtered, QUOTA_PAR_CANDIDAT);
+    setSelectedThemeIds(themeIds);
+    setSessionProposals(order);
+    setCurrentIndex(0);
+    setAnswers({});
+    setStoredRestorable(null);
+    setPendingRestore(null);
+    setResultsRevealed(false);
+    setScreen('swipe');
+    persist(0, {}, order, themeIds);
+  };
+
+  const handleStartFresh = () => startSession(ALL_THEME_IDS);
+
+  const handleCustomizeThemes = () => {
+    setThemesReturnTo(screen);
+    setScreen('themes');
+  };
+
+  const handleThemesConfirmed = (themeIds: string[]) => {
+    startSession(themeIds);
+  };
+
+  const handleResume = () => {
+    // Session déjà chargée en mémoire (on est simplement repassé par
+    // l'accueil) : il n'y a rien à recharger, juste à revenir au bon écran.
+    if (sessionProposals.length > 0) {
+      setScreen(currentIndex >= sessionProposals.length ? 'results' : 'swipe');
+      return;
+    }
+    if (!pendingRestore) return;
+    const proposals = resolveProposals(pendingRestore.proposalIds);
+    setSelectedThemeIds(pendingRestore.selectedThemeIds);
+    setSessionProposals(proposals);
+    setCurrentIndex(pendingRestore.currentIndex);
+    setAnswers(pendingRestore.answers);
+    setScreen(pendingRestore.currentIndex >= proposals.length ? 'results' : 'swipe');
+  };
+
+  const handleAnswer = (proposalId: string, direction: SwipeDirection) => {
+    const nextAnswers = { ...answers, [proposalId]: direction };
+    const nextIndex = currentIndex + 1;
+    setAnswers(nextAnswers);
+    setCurrentIndex(nextIndex);
+    persist(nextIndex, nextAnswers, sessionProposals, selectedThemeIds);
+  };
+
+  const handleUndo = () => {
+    if (currentIndex === 0) return;
+    const prevProposal = sessionProposals[currentIndex - 1];
+    const nextAnswers = { ...answers };
+    delete nextAnswers[prevProposal.id];
+    const nextIndex = currentIndex - 1;
+    setAnswers(nextAnswers);
+    setCurrentIndex(nextIndex);
+    persist(nextIndex, nextAnswers, sessionProposals, selectedThemeIds);
+  };
+
+  const handleDismissTutorial = () => {
+    setShowTutorial(false);
+    markTutorialSeen();
+  };
+
+  const handleSwipeFinish = () => setScreen('review');
+
+  const handleReviewChange = (proposalId: string, direction: SwipeDirection) => {
+    const nextAnswers = { ...answers, [proposalId]: direction };
+    setAnswers(nextAnswers);
+    persist(currentIndex, nextAnswers, sessionProposals, selectedThemeIds);
+  };
+
+  const handleReviewContinue = () => setScreen('results');
+
+  const handleRestart = () => {
+    clearSession();
+    setStoredRestorable(null);
+    setPendingRestore(null);
+    setSessionProposals([]);
+    setCurrentIndex(0);
+    setAnswers({});
+    setResultsRevealed(false);
+    setScreen('intro');
+  };
+
+  // Réinitialisation complète (bouton "Réinitialiser les données" des
+  // réglages) : distincte de `handleRestart`, qui ne remet à zéro que la
+  // session en cours — ici on efface aussi le thème, l'accent et les
+  // vibrations, et on repart de l'état par défaut de l'app.
+  const handleResetAllData = () => {
+    resetAllData();
+    setSchemePreference('system');
+    setAccentId(DEFAULT_ACCENT_ID);
+    setHapticsEnabled(true);
+    // Reverrouiller éteint déjà le mode arc-en-ciel (voir ThemeContext).
+    setRainbowUnlocked(false);
+    setStoredRestorable(null);
+    setPendingRestore(null);
+    setSelectedThemeIds(ALL_THEME_IDS);
+    setSessionProposals([]);
+    setCurrentIndex(0);
+    setAnswers({});
+    setResultsRevealed(false);
+    setScreen('intro');
+  };
+
+  const openHowItWorks = () => {
+    setHowItWorksReturnTo(screen);
+    setScreen('howItWorks');
+  };
+
+  const openSettings = () => {
+    setSettingsReturnTo(screen);
+    setScreen('settings');
+  };
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <SafeAreaProvider>
+        <StatusBar style={effectiveScheme === 'dark' ? 'light' : 'dark'} />
+
+        <ErrorBoundary>
+          {screen === 'intro' && (
+            <ScreenTransition>
+              <IntroScreen
+                onStartFresh={handleStartFresh}
+                onCustomizeThemes={handleCustomizeThemes}
+                restorable={restorable}
+                onResume={handleResume}
+                onOpenHowItWorks={openHowItWorks}
+                onOpenSettings={openSettings}
+              />
+            </ScreenTransition>
+          )}
+
+          {screen === 'settings' && (
+            <ScreenTransition>
+              <SettingsScreen
+                onBack={() => setScreen(settingsReturnTo)}
+                onResetAllData={handleResetAllData}
+              />
+            </ScreenTransition>
+          )}
+
+          {screen === 'howItWorks' && (
+            <ScreenTransition>
+              <HowItWorksScreen onBack={() => setScreen(howItWorksReturnTo)} />
+            </ScreenTransition>
+          )}
+
+          {screen === 'themes' && (
+            <ScreenTransition>
+              <ThemeSelectScreen
+                initialSelection={selectedThemeIds}
+                onConfirm={handleThemesConfirmed}
+                onBack={() => setScreen(themesReturnTo)}
+              />
+            </ScreenTransition>
+          )}
+
+          {screen === 'swipe' && (
+            <ScreenTransition>
+              <SwipeScreen
+                proposals={sessionProposals}
+                currentIndex={currentIndex}
+                answers={answers}
+                onAnswer={handleAnswer}
+                onUndo={handleUndo}
+                onFinish={handleSwipeFinish}
+                onSeeResult={() => setScreen('results')}
+                onRestart={handleRestart}
+                onExit={() => setScreen('intro')}
+                onOpenThemeFilter={handleCustomizeThemes}
+                selectedThemeIds={selectedThemeIds}
+                onOpenSettings={openSettings}
+                showTutorial={showTutorial}
+                onDismissTutorial={handleDismissTutorial}
+              />
+            </ScreenTransition>
+          )}
+
+          {screen === 'review' && (
+            <ScreenTransition>
+              <ReviewScreen
+                proposals={sessionProposals}
+                themesById={THEMES_BY_ID}
+                answers={answers}
+                onChangeAnswer={handleReviewChange}
+                onContinue={handleReviewContinue}
+                // Retour vers le paquet : une fois terminé, l'onglet Swiper
+                // affiche l'écran de fin (message + Recommencer) plutôt que
+                // des cartes, et donne accès aux onglets Classement et
+                // Propositions.
+                onBack={() => setScreen('swipe')}
+              />
+            </ScreenTransition>
+          )}
+
+          {screen === 'results' && (
+            <ScreenTransition>
+              <ResultsScreen
+                proposals={sessionProposals}
+                answers={answers}
+                onRestart={handleRestart}
+                onBack={() => setScreen('review')}
+                // Rien n'est effacé : la session complète reste enregistrée,
+                // et l'accueil rouvre ce résultat par sa carte dédiée.
+                onGoHome={() => setScreen('intro')}
+                onOpenHowItWorks={openHowItWorks}
+                onOpenSettings={openSettings}
+                alreadyRevealed={resultsRevealed}
+                onReveal={() => setResultsRevealed(true)}
+              />
+            </ScreenTransition>
+          )}
+        </ErrorBoundary>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}

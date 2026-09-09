@@ -33,6 +33,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# rapports de couverture des tests : regénérés par npm test, inutiles à versionner
+coverage/
+
 # typescript
 *.tsbuildinfo
 
