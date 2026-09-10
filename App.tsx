@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BackHandler } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { IntroScreen, RestorableSummary } from './src/screens/IntroScreen';
@@ -11,6 +12,7 @@ import { ResultsScreen } from './src/screens/ResultsScreen';
 import { HowItWorksScreen } from './src/screens/HowItWorksScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { IntroAnimation } from './src/components/IntroAnimation';
 import { ScreenTransition } from './src/components/ScreenTransition';
 import { SwipeDirection } from './src/components/SwipeCard';
 import { Answers, Proposal } from './src/types';
@@ -46,6 +48,11 @@ type Screen =
 
 const ALL_THEME_IDS = THEMES.map((t) => t.id);
 
+// L'écran natif ne se retire plus tout seul : sinon il disparaîtrait avant
+// que l'animation du logo ne soit à l'écran, et on verrait un éclair blanc
+// entre les deux. On le garde jusqu'au premier rendu (voir plus bas).
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
 function resolveProposals(ids: string[]): Proposal[] {
   return ids.map((id) => PROPOSALS_BY_ID[id]).filter((p): p is Proposal => Boolean(p));
 }
@@ -69,6 +76,10 @@ function AppInner() {
   } = useThemeSettings();
 
   const [screen, setScreen] = useState<Screen>('booting');
+  // L'animation du logo se joue PAR-DESSUS l'app, qui se monte derrière : la
+  // session est relue et l'écran de destination préparé pendant ces trois
+  // secondes et demie, au lieu de les attendre.
+  const [introDone, setIntroDone] = useState(false);
   const [howItWorksReturnTo, setHowItWorksReturnTo] = useState<Screen>('intro');
   const [settingsReturnTo, setSettingsReturnTo] = useState<Screen>('intro');
   const [themesReturnTo, setThemesReturnTo] = useState<Screen>('intro');
@@ -183,6 +194,13 @@ function AppInner() {
     });
 
     hasSeenTutorial().then((seen) => setShowTutorial(!seen));
+  }, []);
+
+  // Retrait de l'écran natif dès que React a peint quelque chose. Le violet
+  // de l'animation est celui de l'écran natif, à un point près sur un canal :
+  // la bascule est invisible.
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
   }, []);
 
   // Une session démarrée pendant cette exécution de l'app reste "reprenable"
@@ -450,6 +468,9 @@ function AppInner() {
             </ScreenTransition>
           )}
         </ErrorBoundary>
+
+        {/* En dernier, donc au-dessus de tout le reste. */}
+        {!introDone && <IntroAnimation onDone={() => setIntroDone(true)} />}
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

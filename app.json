@@ -28,15 +28,16 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash-icon.png",
+          "image": "./assets/splash-blank.png",
           "imageWidth": 160,
           "backgroundColor": "#5B4FE9",
           "dark": {
-            "image": "./assets/splash-icon.png",
-            "backgroundColor": "#121016"
+            "image": "./assets/splash-blank.png",
+            "backgroundColor": "#5B4FE9"
           }
         }
-      ]
+      ],
+      "expo-video"
     ],
     "extra": {
       "eas": {
