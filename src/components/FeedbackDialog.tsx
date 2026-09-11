@@ -26,13 +26,21 @@ import { useColors } from '../theme/ThemeContext';
 
 // Signaler un bug, proposer une idée, donner un avis.
 //
-// LE POINT DÉLICAT EST LA PROMESSE, PAS LE FORMULAIRE. L'app affirme partout
-// qu'elle n'envoie rien ; une boîte intitulée « envoyer » y contredit tout,
-// même quand elle ne fait que préparer un brouillon. L'encadré du bas dit donc
-// noir sur blanc ce qui se passe — le brouillon s'ouvre dans TON application
-// de messagerie, et c'est toi qui l'envoies — et énumère les deux lignes
-// techniques jointes, en les affichant telles quelles. Rien n'est à croire sur
-// parole : tout est relisible dans le brouillon avant d'appuyer sur envoyer.
+// CE QUI EST À L'ÉCRAN EN PERMANENCE : le choix de la nature, la ou les cases
+// à remplir, un bouton. Rien d'autre.
+//
+// Une version précédente affichait aussi un paragraphe d'accueil et un
+// encadré de six lignes expliquant que l'app ne se connecte à aucun serveur.
+// Les deux disaient des choses justes, et tous deux repoussaient le bouton
+// hors de l'écran dès que le clavier s'ouvrait : on lisait une explication
+// qu'on n'avait pas demandée avant d'atteindre la seule chose qu'on était
+// venu faire.
+//
+// LA PROMESSE RESTE, ELLE A CHANGÉ DE PLACE. Elle vit derrière le « i » de
+// l'entête, à un toucher, et elle est écrite là où elle est utile : quand on
+// se demande ce que le bouton va faire. C'est une information de confiance,
+// pas une étape du parcours — et une garantie qu'on relit rarement deux fois.
+// Elle reste par ailleurs en toutes lettres dans la page confidentialité.
 //
 // Voir data/feedback.ts pour le raisonnement complet sur le courriel.
 export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -41,14 +49,17 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
   const [kind, setKind] = useState<FeedbackKind>('bug');
   const [message, setMessage] = useState('');
   const [complement, setComplement] = useState('');
+  const [infoOuverte, setInfoOuverte] = useState(false);
 
-  // Une boîte rouverte repart à vide. Retrouver le brouillon de la fois
-  // précédente, déjà envoyé, inviterait à l'envoyer deux fois.
+  // Une boîte rouverte repart à vide, explication repliée comprise. Retrouver
+  // le brouillon de la fois précédente, déjà envoyé, inviterait à l'envoyer
+  // deux fois.
   useEffect(() => {
     if (visible) {
       setKind('bug');
       setMessage('');
       setComplement('');
+      setInfoOuverte(false);
     }
   }, [visible]);
 
@@ -73,42 +84,76 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
           style={styles.centrage}
         >
           <View style={styles.card}>
+            {/* Titre, explication et sortie sur une seule ligne. */}
+            <View style={styles.entete}>
+              <Text style={styles.title}>Un retour ?</Text>
+              <Pressable
+                onPress={() => setInfoOuverte((ouvert) => !ouvert)}
+                hitSlop={10}
+                style={({ pressed }) => [
+                  styles.rond,
+                  infoOuverte && styles.rondActif,
+                  pressed && styles.presse,
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: infoOuverte }}
+                accessibilityLabel="Ce que l’application fait de ton message"
+              >
+                <Ionicons
+                  name="information"
+                  size={17}
+                  color={infoOuverte ? colors.onAccent : colors.textSecondary}
+                />
+              </Pressable>
+              <Pressable
+                onPress={onClose}
+                hitSlop={10}
+                style={({ pressed }) => [styles.rond, pressed && styles.presse]}
+                accessibilityRole="button"
+                accessibilityLabel="Fermer"
+              >
+                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            {infoOuverte && (
+              <Text style={styles.info}>
+                L’app ne se connecte à aucun serveur. Elle écrit un brouillon dans ton
+                application de messagerie : tu le relis et tu l’envoies toi-même. Deux lignes y
+                sont ajoutées, celles-ci et rien d’autre : {feedbackContext()}.
+              </Text>
+            )}
+
+            <View style={styles.kindRow}>
+              {FEEDBACK_KINDS.map((nature) => {
+                const actif = kind === nature.kind;
+                return (
+                  <Pressable
+                    key={nature.kind}
+                    onPress={() => setKind(nature.kind)}
+                    style={[styles.kind, actif && styles.kindActive]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: actif }}
+                    accessibilityLabel={nature.label}
+                  >
+                    <Text
+                      style={[styles.kindText, actif && styles.kindTextActive]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.8}
+                    >
+                      {nature.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
             <ScrollView
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.cardContent}
+              contentContainerStyle={styles.champs}
             >
-              <Text style={styles.title}>Un retour ?</Text>
-              <Text style={styles.lead}>
-                Un défaut, une idée, un mot : tout se lit. Choisis de quoi il s’agit, écris,
-                et ton application de messagerie s’ouvrira avec le texte.
-              </Text>
-
-              <View style={styles.kindRow}>
-                {FEEDBACK_KINDS.map((info) => {
-                  const actif = kind === info.kind;
-                  return (
-                    <Pressable
-                      key={info.kind}
-                      onPress={() => setKind(info.kind)}
-                      style={[styles.kind, actif && styles.kindActive]}
-                      accessibilityRole="radio"
-                      accessibilityState={{ checked: actif }}
-                      accessibilityLabel={info.label}
-                    >
-                      <Text
-                        style={[styles.kindText, actif && styles.kindTextActive]}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.8}
-                      >
-                        {info.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
               {/* L'intitulé du champ est celui-là même qui servira
                   d'intertitre dans le courriel : ce qu'on écrit ici arrive
                   là-bas sous la question à laquelle on répond. */}
@@ -124,9 +169,13 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
                 maxLength={FEEDBACK_MAX}
                 accessibilityLabel={info.champ}
               />
-              <Text style={styles.compteur}>
-                {message.length} / {FEEDBACK_MAX}
-              </Text>
+              {/* Le compteur n'apparaît qu'une fois qu'on écrit : « 0 / 1200 »
+                  sous une case vide n'apprend rien et fait du bruit. */}
+              {message.length > 0 && (
+                <Text style={styles.compteur}>
+                  {message.length} / {FEEDBACK_MAX}
+                </Text>
+              )}
 
               {/* Seconde case, réservée au bug : sans marche à suivre, un
                   défaut se corrige rarement. Facultative, et absente du
@@ -150,43 +199,27 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
                   />
                 </>
               )}
-
-              <View style={styles.notice}>
-                <Ionicons name="lock-closed-outline" size={15} color={colors.textSecondary} />
-                <Text style={styles.noticeText}>
-                  L’app n’envoie rien elle-même et ne se connecte à aucun serveur. Elle prépare
-                  un brouillon que tu relis et envoies toi-même. Y sont ajoutées deux lignes,
-                  celles-ci et rien d’autre : {feedbackContext()}.
-                </Text>
-              </View>
             </ScrollView>
 
-            <View style={styles.actions}>
-              <Pressable
-                onPress={onClose}
-                style={({ pressed }) => [styles.button, styles.cancel, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Annuler"
-              >
-                <Text style={styles.cancelText}>Annuler</Text>
-              </Pressable>
-              <Pressable
-                onPress={envoyer}
-                disabled={!pret}
-                style={({ pressed }) => [
-                  styles.button,
-                  styles.confirm,
-                  !pret && styles.confirmDisabled,
-                  pressed && pret && styles.pressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: !pret }}
-                accessibilityLabel="Ouvrir le brouillon dans mon application de messagerie"
-              >
-                <Ionicons name="mail-outline" size={17} color={colors.onAccent} />
-                <Text style={styles.confirmText}>Ouvrir mon mail</Text>
-              </Pressable>
-            </View>
+            {/* UNE SEULE ACTION EN BAS. « Annuler » y tenait la moitié de la
+                largeur pour une sortie déjà offerte deux fois — la croix de
+                l'entête et le fond touchable — et mettait sur le même rang
+                celle qu'on vient chercher et celle qu'on prend par erreur. */}
+            <Pressable
+              onPress={envoyer}
+              disabled={!pret}
+              style={({ pressed }) => [
+                styles.action,
+                !pret && styles.actionEteinte,
+                pressed && pret && styles.presse,
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !pret }}
+              accessibilityLabel="Ouvrir le brouillon dans mon application de messagerie"
+            >
+              <Ionicons name="mail-outline" size={18} color={colors.onAccent} />
+              <Text style={styles.actionTexte}>Ouvrir mon mail</Text>
+            </Pressable>
           </View>
         </KeyboardAvoidingView>
       </View>
@@ -213,11 +246,13 @@ function makeStyles(colors: ColorTokens) {
     card: {
       width: '100%',
       maxWidth: 400,
-      // La boîte ne dépasse jamais l'écran : au-delà, c'est son contenu qui
-      // défile, et les deux boutons restent posés en bas, hors du défilement.
+      // La boîte ne dépasse jamais l'écran : au-delà, ce sont les cases qui
+      // défilent, et l'entête comme le bouton restent en place.
       maxHeight: '100%',
       backgroundColor: colors.surface,
       borderRadius: radii.lg,
+      padding: spacing.lg,
+      gap: spacing.sm,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
       shadowColor: '#1A1730',
@@ -226,21 +261,43 @@ function makeStyles(colors: ColorTokens) {
       shadowRadius: 28,
       elevation: 8,
     },
-    cardContent: {
-      padding: spacing.lg,
+
+    entete: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: spacing.sm,
     },
     title: {
+      flex: 1,
       fontSize: fonts.body + 2,
       fontWeight: '800',
       color: colors.textPrimary,
     },
-    lead: {
-      fontSize: fonts.small,
-      lineHeight: fonts.small * 1.45,
-      color: colors.textSecondary,
-      marginBottom: spacing.xs,
+    // Les deux boutons de l'entête ont la même forme : ils appartiennent au
+    // cadre de la boîte, pas à son contenu.
+    rond: {
+      width: 32,
+      height: 32,
+      borderRadius: radii.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surfaceAlt,
     },
+    rondActif: {
+      backgroundColor: colors.accent,
+    },
+    presse: {
+      opacity: 0.7,
+    },
+    info: {
+      fontSize: fonts.tiny,
+      lineHeight: fonts.tiny * 1.5,
+      color: colors.textSecondary,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radii.md,
+      padding: spacing.sm + 2,
+    },
+
     kindRow: {
       flexDirection: 'row',
       backgroundColor: colors.surfaceAlt,
@@ -265,6 +322,11 @@ function makeStyles(colors: ColorTokens) {
     kindTextActive: {
       color: colors.onAccent,
     },
+
+    champs: {
+      gap: spacing.xs,
+      paddingBottom: spacing.xs,
+    },
     // Intitulé de case. Il porte le même mot que l'intertitre du courriel,
     // pour qu'on sache en écrivant sous quel titre le texte arrivera.
     champTitre: {
@@ -273,8 +335,7 @@ function makeStyles(colors: ColorTokens) {
       letterSpacing: 0.4,
       textTransform: 'uppercase',
       color: colors.textMuted,
-      marginTop: spacing.sm,
-      paddingHorizontal: spacing.xs,
+      marginTop: spacing.xs,
     },
     champEntete: {
       flexDirection: 'row',
@@ -285,11 +346,10 @@ function makeStyles(colors: ColorTokens) {
       fontSize: fonts.tiny,
       fontWeight: '600',
       color: colors.textMuted,
-      marginTop: spacing.sm,
-      paddingHorizontal: spacing.xs,
+      marginTop: spacing.xs,
     },
     input: {
-      minHeight: 120,
+      minHeight: 110,
       maxHeight: 200,
       backgroundColor: colors.surfaceAlt,
       borderRadius: radii.md,
@@ -299,13 +359,10 @@ function makeStyles(colors: ColorTokens) {
       fontSize: fonts.small + 1,
       lineHeight: (fonts.small + 1) * 1.45,
       color: colors.textPrimary,
-      marginTop: spacing.xs,
     },
     // La marche à suivre tient en quelques lignes : la case n'a pas à ouvrir
     // aussi grand que celle du récit. Elle doit tout de même contenir son
-    // propre filigrane, qui fait trois lignes numérotées : à 84 px, il
-    // arrivait déjà avec une barre de défilement, ce qui donnait l'impression
-    // d'un champ trop petit avant même d'avoir écrit un mot.
+    // propre filigrane, qui fait trois lignes numérotées.
     inputCourt: {
       minHeight: 104,
       maxHeight: 150,
@@ -317,57 +374,23 @@ function makeStyles(colors: ColorTokens) {
       color: colors.textMuted,
       fontVariant: ['tabular-nums'],
     },
-    notice: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: spacing.sm,
-      backgroundColor: colors.surfaceAlt,
-      borderRadius: radii.md,
-      padding: spacing.sm + 2,
-      marginTop: spacing.xs,
-    },
-    noticeText: {
-      flex: 1,
-      fontSize: fonts.tiny,
-      lineHeight: fonts.tiny * 1.5,
-      color: colors.textSecondary,
-    },
-    actions: {
-      flexDirection: 'row',
-      gap: spacing.sm,
-      paddingHorizontal: spacing.lg,
-      paddingBottom: spacing.lg,
-    },
-    button: {
-      flex: 1,
+
+    action: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: spacing.xs + 2,
-      paddingVertical: spacing.md - 2,
-      borderRadius: radii.pill,
-    },
-    pressed: {
-      opacity: 0.8,
-    },
-    cancel: {
-      backgroundColor: colors.surfaceAlt,
-    },
-    cancelText: {
-      fontSize: fonts.small + 1,
-      fontWeight: '700',
-      color: colors.textSecondary,
-    },
-    confirm: {
+      gap: spacing.sm,
       backgroundColor: colors.accent,
+      borderRadius: radii.pill,
+      paddingVertical: spacing.md,
     },
     // Éteint tant que rien n'est écrit : ouvrir une application de messagerie
     // sur un brouillon vide n'aide personne.
-    confirmDisabled: {
+    actionEteinte: {
       opacity: 0.4,
     },
-    confirmText: {
-      fontSize: fonts.small + 1,
+    actionTexte: {
+      fontSize: fonts.body,
       fontWeight: '700',
       color: colors.onAccent,
     },
