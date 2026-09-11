@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -14,10 +24,12 @@ import {
   codeLisible,
   comparerDuel,
   decoderDuel,
+  DUEL_CODE_LENGTH,
   DuelComparaison,
   DuelResultat,
   duelUrl,
   encoderDuel,
+  nettoyerCode,
 } from '../utils/duel';
 import { Answers, Proposal } from '../types';
 import { ColorTokens, fonts, radii, spacing } from '../theme';
@@ -67,7 +79,11 @@ export function DuelScreen({
     [mesResultats]
   );
 
+  // La saisie est conservée NETTOYÉE, sans espaces ni minuscules : c'est elle
+  // qu'on décode, et la mise en forme n'est qu'un habillage à l'affichage.
   const [saisie, setSaisie] = useState('');
+  const defilement = useRef<ScrollView>(null);
+  const champ = useRef<TextInput>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [autre, setAutre] = useState<DuelResultat | null>(null);
   // « Copié » remplace le libellé du bouton pendant deux secondes.
@@ -116,6 +132,18 @@ export function DuelScreen({
   useEffect(() => {
     if (codeRecu) lire(codeRecu);
   }, [codeRecu, lire]);
+
+  // Le champ est le dernier bloc de l'écran : l'amener en bas de la zone
+  // visible suffit à le dégager du clavier, quelle que soit la hauteur de
+  // celui-ci. Le délai laisse le temps au clavier de s'ouvrir, donc à la mise
+  // en page de se réduire, faute de quoi on ferait défiler vers une fin
+  // d'écran qui n'est pas encore la bonne.
+  // Le compte y est : ni trop court, ni tronqué.
+  const complet = saisie.length === DUEL_CODE_LENGTH;
+
+  const remonterLeChamp = () => {
+    setTimeout(() => defilement.current?.scrollToEnd({ animated: true }), 250);
+  };
 
   const comparaison = useMemo<DuelComparaison | null>(
     () => (autre ? comparerDuel(mesResultats, autre) : null),
@@ -173,9 +201,25 @@ export function DuelScreen({
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <ScreenHeader title="Duel" onBack={onBack} />
 
+      {/* LE CLAVIER RECOUVRAIT LE CHAMP, qui est le dernier bloc de l'écran.
+          On tapait donc un code de vingt-six caractères à l'aveugle, sans
+          pouvoir le relire ni le comparer à celui qu'on recopiait — c'est-à-
+          dire en étant sûr de finir par une faute qu'on ne verrait pas.
+
+          Deux mécanismes, un par plateforme. Sur iOS le clavier se pose PAR
+          DESSUS la page sans rien déplacer : `padding` réserve sa hauteur en
+          bas de la vue, ce qui raccourcit la zone défilante d'autant. Sur
+          Android le système redimensionne déjà la fenêtre, et lui ajouter un
+          rembourrage la réduirait deux fois. */}
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
       <ScrollView
+        ref={defilement}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.lead}>
@@ -258,19 +302,36 @@ export function DuelScreen({
             code. Les majuscules et les espaces n’ont pas d’importance.
           </Text>
 
+          {/* LE CODE SE MET EN FORME PENDANT LA FRAPPE, en groupes de quatre,
+              exactement comme il s'affiche sur l'écran de l'autre. C'est ce
+              qui permet de comparer les deux d'un coup d'œil et de repérer
+              une faute avant de valider, au lieu de découvrir après coup
+              qu'un caractère ne va pas. La casse et les espaces sont remis
+              d'office, et coller le lien entier marche aussi. */}
           <TextInput
+            ref={champ}
             style={styles.champ}
-            value={saisie}
+            value={codeLisible(saisie)}
             onChangeText={(texte) => {
-              setSaisie(texte);
+              setSaisie(nettoyerCode(texte));
               setErreur(null);
             }}
+            onFocus={remonterLeChamp}
             placeholder="Par exemple 04A2 9K7M 1TPZ…"
             placeholderTextColor={colors.textMuted}
             autoCapitalize="characters"
             autoCorrect={false}
+            autoComplete="off"
+            // `done` plutôt que `next` : il n'y a rien après ce champ, et le
+            // bouton du clavier lance directement la comparaison.
+            returnKeyType="done"
+            onSubmitEditing={() => complet && lire(saisie)}
             accessibilityLabel="Code de duel de l’autre personne"
           />
+
+          <Text style={styles.compteur}>
+            {saisie.length} / {DUEL_CODE_LENGTH} caractères
+          </Text>
 
           {erreur && (
             <View style={styles.erreur}>
@@ -279,17 +340,24 @@ export function DuelScreen({
             </View>
           )}
 
+          {/* Le bouton n'attend pas qu'on ait fini pour dire qu'il manque
+              quelque chose : il reste éteint tant que le compte n'y est pas,
+              et le compteur juste au-dessus explique pourquoi. */}
           <Pressable
             onPress={() => lire(saisie)}
-            disabled={saisie.trim().length === 0}
+            disabled={!complet}
             style={({ pressed }) => [
               styles.principal,
-              saisie.trim().length === 0 && styles.principalEteint,
-              pressed && saisie.trim().length > 0 && styles.presse,
+              !complet && styles.principalEteint,
+              pressed && complet && styles.presse,
             ]}
             accessibilityRole="button"
-            accessibilityState={{ disabled: saisie.trim().length === 0 }}
-            accessibilityLabel="Comparer avec ce code"
+            accessibilityState={{ disabled: !complet }}
+            accessibilityLabel={
+              complet
+                ? 'Comparer avec ce code'
+                : `Comparer, il manque ${DUEL_CODE_LENGTH - saisie.length} caractères`
+            }
           >
             <Text style={styles.principalTexte}>Comparer</Text>
           </Pressable>
@@ -301,6 +369,7 @@ export function DuelScreen({
           est dans les caractères que vous échangez.
         </Text>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -532,6 +601,15 @@ function makeStyles(colors: ColorTokens) {
       color: colors.textPrimary,
     },
 
+    // Le décompte de la saisie. Il dit à la fois où l'on en est et pourquoi le
+    // bouton reste éteint, ce qui évite d'avoir à écrire la seconde chose.
+    compteur: {
+      alignSelf: 'flex-end',
+      fontSize: fonts.tiny,
+      fontWeight: '600',
+      color: colors.textMuted,
+      fontVariant: ['tabular-nums'],
+    },
     principal: {
       alignItems: 'center',
       backgroundColor: colors.accent,

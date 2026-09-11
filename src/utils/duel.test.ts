@@ -4,6 +4,8 @@ import {
   codeDepuisUrl,
   codeLignes,
   codeLisible,
+  DUEL_CODE_LENGTH,
+  nettoyerCode,
   comparerDuel,
   decoderDuel,
   DUEL_FORMAT,
@@ -193,5 +195,46 @@ describe('affichage du code', () => {
     expect(groupes.slice(0, -1).every((g) => g.length === 4)).toBe(true);
     // Les deux lignes se ressemblent : au plus un groupe d'écart.
     expect(Math.abs(haut.split(' ').length - bas.split(' ').length)).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('saisie du code', () => {
+  const code = encoderDuel(classement(TOUS));
+
+  it('annonce la longueur attendue, celle que produit l’encodeur', () => {
+    expect(DUEL_CODE_LENGTH).toBe(26);
+    expect(code).toHaveLength(DUEL_CODE_LENGTH);
+  });
+
+  it('remet la casse et retire les espaces de confort', () => {
+    expect(nettoyerCode(codeLisible(code).toLowerCase())).toBe(code);
+  });
+
+  // La faute la plus probable de toutes : c'est le LIEN qui circule dans les
+  // messages, donc le lien qu'on a dans son presse-papier.
+  it('accepte le lien entier collé à la place du code', () => {
+    expect(nettoyerCode(duelUrl(code))).toBe(code);
+    expect(nettoyerCode(`Compare avec moi : ${duelUrl(code)}`)).toBe(code);
+  });
+
+  it('écarte les caractères hors alphabet plutôt que de les garder', () => {
+    // I, L, O et U n'existent pas dans l'alphabet : ils se confondent avec 1
+    // et 0, et un décodeur ne saurait qu'en faire.
+    expect(nettoyerCode('0773-75HW')).toBe('077375HW');
+    expect(nettoyerCode('ILOU')).toBe('');
+  });
+
+  it('ne laisse jamais dépasser la longueur d’un code', () => {
+    expect(nettoyerCode(code + code)).toHaveLength(DUEL_CODE_LENGTH);
+    expect(nettoyerCode(code + code)).toBe(code);
+  });
+
+  // La mise en forme pendant la frappe ne doit rien perdre : ce qui est
+  // réaffiché, renettoyé, doit redonner exactement la même chose.
+  it('résiste à l’aller-retour affichage / saisie, à toute longueur', () => {
+    for (let n = 0; n <= DUEL_CODE_LENGTH; n++) {
+      const partiel = code.slice(0, n);
+      expect(nettoyerCode(codeLisible(partiel))).toBe(partiel);
+    }
   });
 });

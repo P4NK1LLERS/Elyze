@@ -194,6 +194,32 @@ export function codeDepuisUrl(url: string): string | null {
   return code.length > 0 ? code : null;
 }
 
+// Longueur d'un code, en caractères. Cinq bits par caractère, d'où l'arrondi
+// supérieur. C'est ce nombre qui dit à la saisie quand elle est complète.
+export const DUEL_CODE_LENGTH = Math.ceil((TAILLE * 8) / 5);
+
+// Nettoie ce qui a été tapé ou collé, pour n'en garder qu'un code.
+//
+// TROIS FAUTES SONT CORRIGÉES SANS RIEN DEMANDER, parce qu'aucune ne dit quoi
+// que ce soit sur l'intention de celui qui saisit : la casse, les espaces de
+// confort, et le fait d'avoir collé le lien entier plutôt que le code. Cette
+// dernière est la plus probable de toutes — le lien est ce qui circule, et
+// c'est lui qu'on a dans son presse-papier après avoir reçu un message.
+//
+// Ce qui n'est PAS corrigé : un caractère faux. Il est écarté s'il n'existe
+// pas dans l'alphabet, mais un « 8 » tapé pour un « B » passe, et c'est la
+// somme de contrôle qui l'arrête ensuite. Deviner à la place de quelqu'un ce
+// qu'il a voulu écrire serait pire que de le lui dire.
+export function nettoyerCode(saisie: string): string {
+  const brut = codeDepuisUrl(saisie) ?? saisie;
+  let sortie = '';
+  for (const caractere of brut.toUpperCase()) {
+    if (sortie.length >= DUEL_CODE_LENGTH) break;
+    if (ALPHABET.includes(caractere)) sortie += caractere;
+  }
+  return sortie;
+}
+
 // Mise en forme du code pour l'œil et pour la main : des groupes de quatre.
 export function codeLisible(code: string): string {
   return (code.match(/.{1,4}/g) ?? []).join(' ');
