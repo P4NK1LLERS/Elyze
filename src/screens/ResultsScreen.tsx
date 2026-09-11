@@ -340,6 +340,39 @@ export function ResultsScreen({
           </Animated.View>
         )}
 
+        {/* LE DUEL, JUSTE SOUS LE PODIUM.
+            Il a d'abord vécu en bas de l'écran, après les onze lignes du
+            classement complet : une invitation qu'il fallait aller chercher au
+            terme d'un long défilement, donc que presque personne n'aurait
+            trouvée. Sa place est ici, à l'instant où l'on vient d'apprendre
+            son résultat et où la seule question qui reste est de savoir ce que
+            les autres ont eu.
+
+            Il entre APRÈS la révélation, pas pendant : une proposition qui
+            apparaît au milieu du rideau détournerait le regard du seul moment
+            que l'écran met en scène. */}
+        <Animated.View
+          entering={skipEntrance ? undefined : FadeInDown.delay(winnerAt + 500).duration(400)}
+        >
+          <Pressable
+            onPress={onOpenDuel}
+            style={({ pressed }) => [styles.duelButton, pressed && styles.duelPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Défier quelqu’un, comparer ton classement au sien"
+          >
+            <View style={styles.duelIcone}>
+              <Ionicons name="qr-code" size={22} color={colors.onAccent} />
+            </View>
+            <View style={styles.duelTexts}>
+              <Text style={styles.duelTitle}>Défier quelqu’un</Text>
+              <Text style={styles.duelHint}>
+                Montre ton QR code, et voyez vos deux classements côte à côte.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.accentText} />
+          </Pressable>
+        </Animated.View>
+
         <View style={styles.subTabRow}>
           <Pressable
             onPress={() => selectRankingView('overview')}
@@ -398,28 +431,6 @@ export function ResultsScreen({
             <ThemeAgreementList entries={themeAgreement} showCandidates hiddenNote="" />
           </View>
         )}
-
-        {/* LE DUEL EST ICI, ET PAS DANS LE PIED DE PAGE.
-            La rangée du bas porte déjà « Accueil » et « Partager », deux
-            boutons qui se partagent une largeur fixe ; un troisième les aurait
-            réduits à des libellés tronqués. Surtout, comparer son classement à
-            celui de quelqu'un se décide APRÈS l'avoir lu, pas en même temps
-            qu'on cherche la sortie : sa place est à la fin de la lecture. */}
-        <Pressable
-          onPress={onOpenDuel}
-          style={({ pressed }) => [styles.duelButton, pressed && styles.duelPressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Comparer ton classement à celui de quelqu’un d’autre"
-        >
-          <Ionicons name="git-compare-outline" size={20} color={colors.accentText} />
-          <View style={styles.duelTexts}>
-            <Text style={styles.duelTitle}>Comparer avec quelqu’un</Text>
-            <Text style={styles.duelHint}>
-              Un QR code à faire scanner, et vos deux classements côte à côte.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.accentText} />
-        </Pressable>
 
         <Text style={styles.footnote}>
           Propositions recensées par Poligraph (poligraph.fr), à raison du même nombre par
@@ -664,24 +675,41 @@ function makeStyles(colors: ColorTokens) {
       flexDirection: 'row',
       gap: spacing.md,
     },
+    // Fond teinté et non plein : le bouton plein de cet écran est
+    // « Partager », en bas, et deux aplats d'accent à l'écran en même temps ne
+    // désigneraient plus rien. La présence vient de la place occupée, de la
+    // pastille pleine et du liseré, pas d'un aplat de plus.
     duelButton: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.md,
       backgroundColor: colors.accentSoft,
       borderRadius: radii.lg,
-      paddingVertical: spacing.md,
+      paddingVertical: spacing.md + 2,
       paddingHorizontal: spacing.lg,
+      borderWidth: 1,
+      borderColor: colors.accent,
     },
     duelPressed: {
       opacity: 0.7,
+    },
+    // La seule chose pleinement colorée de l'encart, et elle porte un QR code :
+    // c'est ce dessin qui dit en un coup d'œil de quoi il s'agit, là où
+    // « défier » seul resterait abstrait.
+    duelIcone: {
+      width: 40,
+      height: 40,
+      borderRadius: radii.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.accent,
     },
     duelTexts: {
       flex: 1,
       gap: 2,
     },
     duelTitle: {
-      fontSize: fonts.small + 1,
+      fontSize: fonts.body,
       fontWeight: '800',
       color: colors.accentText,
     },
