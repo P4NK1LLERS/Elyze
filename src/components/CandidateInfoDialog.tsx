@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -45,6 +45,13 @@ export function CandidateInfoDialog({
   const { effectiveScheme } = useThemeSettings();
   const reducedMotion = useReducedMotion();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const [tousLesSujets, setTousLesSujets] = useState(false);
+
+  // Chaque fiche s'ouvre repliée. Sans cette remise à zéro, avoir déplié les
+  // sujets d'un candidat laissait la fiche du suivant ouverte en grand.
+  useEffect(() => {
+    setTousLesSujets(false);
+  }, [candidate?.id]);
 
   const stats = useMemo(() => {
     if (!candidate) return null;
@@ -157,45 +164,74 @@ export function CandidateInfoDialog({
             <Animated.View style={styles.themeBlock} entering={enter(3)}>
               <Text style={styles.label}>Sujets abordés</Text>
               {revealThemes ? (
-                // Bande qui défile plutôt qu'un pavé qui s'enroule.
+                // PAVÉ QUI S'ENROULE, REPLIÉ PAR DÉFAUT.
                 //
-                // Quinze pastilles à la ligne occupaient quatre ou cinq
-                // rangées, soit près du tiers de la fiche pour une
-                // information d'appoint : elles repoussaient le bouton vers
-                // Poligraph hors de l'écran. En une seule rangée qui glisse,
-                // la même liste tient sur une hauteur de pastille. Les
-                // pastilles sont triées par nombre décroissant, donc ce qui
-                // compte le plus reste visible sans avoir à faire défiler.
+                // Trois dispositions ont été essayées ici, et chacune corrige
+                // le défaut de la précédente.
                 //
-                // La bande déborde volontairement des marges de la fiche
-                // (`strip`) : une pastille coupée par le bord de l'écran est
-                // ce qui dit, sans le écrire, qu'il y en a d'autres à droite.
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.strip}
-                  contentContainerStyle={styles.stripContent}
-                >
-                  {stats.themes.map(({ theme, count }) => {
-                    const tint = themeChipColors(
-                      getThemeColor(theme.id),
-                      colors.surface,
-                      effectiveScheme === 'dark'
-                    );
-                    return (
-                      <View
-                        key={theme.id}
-                        style={[styles.chip, { backgroundColor: tint.background }]}
-                      >
-                        <Text style={styles.chipIcon}>{theme.icon}</Text>
-                        <Text style={[styles.chipLabel, { color: tint.text }]} numberOfLines={1}>
-                          {theme.label}
-                        </Text>
-                        <Text style={[styles.chipCount, { color: tint.text }]}>{count}</Text>
-                      </View>
-                    );
-                  })}
-                </ScrollView>
+                // 1. Toutes les pastilles à la ligne : quatre ou cinq rangées,
+                //    près du tiers de la fiche pour une information d'appoint.
+                // 2. Une bande horizontale qui défile : la hauteur tombait à
+                //    une seule pastille, mais au prix du reste. Une bande qui
+                //    glisse est un CONTENU CACHÉ — au-delà de la troisième
+                //    pastille, plus rien ne s'atteint sans deviner qu'il faut
+                //    pousser de côté, geste qu'aucune autre partie de l'app
+                //    ne demande. Et elle piégeait le doigt : posé sur la
+                //    bande, un glissement vertical pour lire la suite de la
+                //    fiche était pris pour un glissement de la bande.
+                // 3. Ici : les pastilles s'enroulent, mais on n'en montre que
+                //    les six premières, triées par nombre décroissant. Deux
+                //    rangées, la même hauteur qu'avant en pratique, et la
+                //    suite est à un toucher franc plutôt qu'à un geste
+                //    latéral. Tout est atteignable, rien n'est imposé.
+                <View style={styles.wrap}>
+                  {(tousLesSujets ? stats.themes : stats.themes.slice(0, SUJETS_REPLIES)).map(
+                    ({ theme, count }) => {
+                      const tint = themeChipColors(
+                        getThemeColor(theme.id),
+                        colors.surface,
+                        effectiveScheme === 'dark'
+                      );
+                      return (
+                        <View
+                          key={theme.id}
+                          style={[styles.chip, { backgroundColor: tint.background }]}
+                        >
+                          <Text style={styles.chipIcon}>{theme.icon}</Text>
+                          <Text style={[styles.chipLabel, { color: tint.text }]} numberOfLines={1}>
+                            {theme.label}
+                          </Text>
+                          <Text style={[styles.chipCount, { color: tint.text }]}>{count}</Text>
+                        </View>
+                      );
+                    }
+                  )}
+
+                  {stats.themes.length > SUJETS_REPLIES && (
+                    <Pressable
+                      onPress={() => setTousLesSujets((ouvert) => !ouvert)}
+                      style={({ pressed }) => [styles.moreChip, pressed && styles.pressed]}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: tousLesSujets }}
+                      accessibilityLabel={
+                        tousLesSujets
+                          ? 'Replier la liste des sujets'
+                          : `Afficher les ${stats.themes.length - SUJETS_REPLIES} autres sujets`
+                      }
+                    >
+                      <Text style={styles.moreChipText}>
+                        {tousLesSujets
+                          ? 'Replier'
+                          : `+${stats.themes.length - SUJETS_REPLIES}`}
+                      </Text>
+                      <Ionicons
+                        name={tousLesSujets ? 'chevron-up' : 'chevron-down'}
+                        size={13}
+                        color={colors.accentText}
+                      />
+                    </Pressable>
+                  )}
+                </View>
               ) : (
                 <View style={styles.lockedRow}>
                   <Ionicons name="eye-off-outline" size={15} color={colors.textSecondary} />
@@ -249,6 +285,12 @@ function Stat({
 
 const AVATAR = 112;
 const RING = 4;
+
+// Pastilles montrées avant dépliage. Six, parce que deux rangées suffisent à
+// dire de quoi ce candidat parle le plus : la liste est triée par nombre
+// décroissant, donc les six premières portent l'essentiel. Au-delà, on entre
+// dans la queue de distribution, celle qu'on va chercher si on la cherche.
+const SUJETS_REPLIES = 6;
 
 function makeStyles(colors: ColorTokens) {
   // Ombre douce commune aux cartes : c'est elle qui les détache du fond, à la
@@ -383,16 +425,28 @@ function makeStyles(colors: ColorTokens) {
       textTransform: 'uppercase',
       color: colors.textSecondary,
     },
-    // La bande annule les marges de la fiche pour aller d'un bord à l'autre
-    // de l'écran, et les restitue à son contenu — sinon la première pastille
-    // serait collée au bord.
-    strip: {
-      marginHorizontal: -(spacing.lg + spacing.xs),
-    },
-    stripContent: {
+    wrap: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       gap: 7,
-      paddingHorizontal: spacing.lg + spacing.xs,
+    },
+    // Le bouton de dépliage prend la forme d'une pastille et se range dans la
+    // même grille : il se lit comme la suite de la liste, pas comme une
+    // commande posée à côté d'elle.
+    moreChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      paddingVertical: 7,
+      paddingHorizontal: spacing.sm + 2,
+      borderRadius: radii.pill,
+      backgroundColor: colors.accentSoft,
+    },
+    moreChipText: {
+      fontSize: fonts.tiny + 1,
+      fontWeight: '800',
+      color: colors.accentText,
+      fontVariant: ['tabular-nums'],
     },
     lockedRow: {
       flexDirection: 'row',

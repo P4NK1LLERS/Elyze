@@ -8,7 +8,6 @@ import { ActionButtons } from '../components/ActionButtons';
 import { SwipeTutorialOverlay } from '../components/SwipeTutorialOverlay';
 import { BottomTabBar, BottomTabItem } from '../components/BottomTabBar';
 import { ThemeMosaic } from '../components/ThemeMosaic';
-import { CandidateGrid } from '../components/CandidateGrid';
 import { RankingPanel } from '../components/RankingPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
@@ -37,7 +36,7 @@ import {
   passedMilestones,
 } from '../utils/milestones';
 import { loadRevealCandidates, saveRevealCandidates } from '../utils/storage';
-import { Answers, Proposal } from '../types';
+import { Answers, Proposal, ThemeTag } from '../types';
 import { ColorTokens, fonts, radii, spacing } from '../theme';
 import { useColors } from '../theme/ThemeContext';
 
@@ -61,19 +60,24 @@ type Props = {
   onDismissTutorial: () => void;
 };
 
-type SwipeTab = 'swipe' | 'ranking' | 'propositions' | 'candidats';
+type SwipeTab = 'swipe' | 'ranking' | 'propositions';
 
-// Quatre onglets, plus l'action « Thèmes » que la barre affiche à part (voir
+// Trois onglets, plus l'action « Thèmes » que la barre affiche à part (voir
 // BottomTabBar). Cette action a brièvement été déplacée dans l'en-tête pour
 // libérer un slot ; c'était une erreur, elle y devenait une icône muette alors
 // qu'elle commande ce qu'on swipe. L'en-tête n'a de toute façon pas la place
 // d'un libellé : la piste de la barre de progression n'y fait qu'une centaine
 // de pixels, et un troisième bouton la réduisait de moitié.
+//
+// Ils étaient quatre. « Candidats » a rejoint le panneau Classement, dont il
+// est une vue : un trombinoscope qui ne change jamais ne justifie pas un
+// bouton permanent, et son départ rend à « Propositions » la largeur qui lui
+// manquait pour tenir sans rétrécir (voir CandidateGrid pour le raisonnement
+// complet).
 const SWIPE_TABS: BottomTabItem<SwipeTab>[] = [
   { key: 'swipe', label: 'Swiper', icon: 'layers-outline' },
   { key: 'ranking', label: 'Classement', icon: 'trophy-outline' },
   { key: 'propositions', label: 'Propositions', icon: 'grid-outline' },
-  { key: 'candidats', label: 'Candidats', icon: 'people-outline' },
 ];
 
 export function SwipeScreen({
@@ -118,6 +122,10 @@ export function SwipeScreen({
   // d'une carte précise (un candidat n'a souvent qu'une proposition par thème)
   // alors même que la mosaïque, juste à côté, les masquait par défaut.
   const [revealCandidates, setRevealCandidates] = useState(false);
+  // Thème ouvert dans l'onglet Propositions, remonté de la mosaïque pour que
+  // le retour matériel puisse le refermer avant de quitter l'onglet (voir le
+  // gestionnaire plus bas, et l'entête de ThemeMosaic).
+  const [openTheme, setOpenTheme] = useState<ThemeTag | null>(null);
 
   useEffect(() => {
     loadRevealCandidates().then(setRevealCandidates);
@@ -204,18 +212,33 @@ export function SwipeScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, isDeckDone]);
 
-  // Depuis un autre onglet (Classement, Propositions), le retour matériel
-  // ramène d'abord au swipe plutôt que de quitter l'écran : consulter son
-  // classement provisoire ne doit pas donner l'impression d'avoir perdu sa
-  // progression. Enregistré ici pour passer avant le handler global d'App.tsx.
+  // Retour matériel : UN PAS EN ARRIÈRE, PAS DEUX.
+  //
+  // Depuis un autre onglet (Classement, Propositions), il ramène au swipe
+  // plutôt que de quitter l'écran : consulter son classement provisoire ne
+  // doit pas donner l'impression d'avoir perdu sa progression.
+  //
+  // Mais l'onglet Propositions a lui-même deux niveaux : la mosaïque des
+  // thèmes, puis la liste des propositions d'un thème. Depuis cette liste, le
+  // retour sautait les deux d'un coup et atterrissait sur les cartes — alors
+  // que le chevron affiché juste à l'écran, lui, revenait bien à la mosaïque.
+  // Deux gestes censés faire la même chose n'en faisaient pas la même.
+  //
+  // Enregistré ici pour passer avant le gestionnaire global d'App.tsx.
   useEffect(() => {
-    if (tab === 'swipe') return;
+    if (tab === 'swipe' && !openTheme) return;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Le palier le plus profond d'abord : la liste d'un thème se referme
+      // sur la mosaïque, et on reste dans l'onglet Propositions.
+      if (openTheme) {
+        setOpenTheme(null);
+        return true;
+      }
       setTab('swipe');
       return true;
     });
     return () => subscription.remove();
-  }, [tab]);
+  }, [tab, openTheme]);
 
   // Un thème sans proposition ne peut pas être sélectionné (l'écran de choix
   // ne l'affiche pas), donc le total de référence est le nombre de thèmes
@@ -324,7 +347,7 @@ export function SwipeScreen({
               accessibilityRole="button"
               accessibilityLabel="Recommencer à zéro"
             >
-              <Ionicons name="refresh" size={16} color={colors.textSecondary} />
+              <Ionicons name="refresh" size={16} color={colors.accentText} />
               <Text style={styles.doneSecondaryText}>Recommencer</Text>
             </Pressable>
           </View>
@@ -365,10 +388,10 @@ export function SwipeScreen({
           answers={answers}
           revealCandidates={showCandidates}
           onToggleReveal={toggleReveal}
+          selectedTheme={openTheme}
+          onSelectTheme={setOpenTheme}
         />
       )}
-
-      {tab === 'candidats' && <CandidateGrid onSelect={setInfoCandidateId} />}
 
       {tab === 'ranking' && (
         <RankingPanel
@@ -376,6 +399,7 @@ export function SwipeScreen({
           topMatch={topMatch}
           confidenceLabel={confidenceLabel}
           themeAgreement={themeAgreement}
+          deckDone={isDeckDone}
           showCandidates={showCandidates}
           onSelectCandidate={setSelectedCandidateId}
           onOpenCandidateInfo={setInfoCandidateId}
@@ -422,7 +446,6 @@ export function SwipeScreen({
         title="Recommencer ?"
         message="Ta session actuelle (réponses et résultat) sera effacée définitivement."
         confirmLabel="Recommencer"
-        destructive
         onConfirm={() => {
           setConfirmingRestart(false);
           onRestart();
@@ -435,7 +458,6 @@ export function SwipeScreen({
         title="Changer de thèmes ?"
         message="Choisir d’autres thèmes redémarrera ta session actuelle : tes réponses en cours seront perdues."
         confirmLabel="Changer"
-        destructive
         onConfirm={() => {
           setConfirmingThemeFilter(false);
           onOpenThemeFilter();
@@ -571,11 +593,23 @@ function makeStyles(colors: ColorTokens) {
       fontWeight: '700',
       color: colors.onAccent,
     },
+    // LA COULEUR CHOISIE DANS LES RÉGLAGES, pas un gris de service.
+    //
+    // Recommencer est une action ordinaire : on relance une partie, on ne
+    // casse rien d'irremplaçable. En gris, posé sous un bouton d'accent plein,
+    // il se lisait comme désactivé. Il garde son rang de second rôle par son
+    // fond atténué (`accentSoft`) face au plein du bouton principal, et non
+    // plus en renonçant à la couleur de l'app.
     doneSecondary: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       gap: spacing.xs + 2,
+      alignSelf: 'stretch',
+      maxWidth: 320,
+      marginTop: spacing.xs,
+      backgroundColor: colors.accentSoft,
+      borderRadius: radii.pill,
       paddingVertical: spacing.md,
       paddingHorizontal: spacing.lg,
     },
@@ -585,7 +619,7 @@ function makeStyles(colors: ColorTokens) {
     doneSecondaryText: {
       fontSize: fonts.small + 1,
       fontWeight: '700',
-      color: colors.textSecondary,
+      color: colors.accentText,
     },
   });
 }

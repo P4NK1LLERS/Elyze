@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from './Avatar';
@@ -22,12 +22,27 @@ import { useColors, useThemeColor } from '../theme/ThemeContext';
 // Qui propose quoi reste masqué par défaut, pour ne pas biaiser les réponses
 // pendant le swipe. L'état de la bascule est tenu par l'écran parent, qui
 // l'applique aussi au classement par thème (voir SwipeScreen).
+// LE THÈME OUVERT EST TENU PAR L'ÉCRAN, pas par ce composant.
+//
+// Il vivait ici, en état local, et c'était juste tant que la seule façon de
+// refermer la liste était le chevron. Mais le retour matériel d'Android, lui,
+// était capté plus haut : il ramenait droit au paquet de cartes depuis
+// l'intérieur d'un thème, sautant par-dessus la mosaïque qu'on venait de
+// quitter. Deux pas en arrière pour un seul geste.
+//
+// Remonter l'état plutôt qu'ajouter un second gestionnaire de retour est ce
+// qui rend l'ordre certain : deux `BackHandler` concurrents se départagent par
+// leur ordre d'inscription, donc par l'ordre des effets de React — un détail
+// d'implémentation, pas une règle sur laquelle bâtir une navigation. Ici, un
+// seul gestionnaire lit un seul état (voir SwipeScreen).
 export function ThemeMosaic({
   proposals,
   deckIds,
   answers,
   revealCandidates,
   onToggleReveal,
+  selectedTheme,
+  onSelectTheme,
 }: {
   // Tout le catalogue, pas seulement le paquet en cours.
   proposals: Proposal[];
@@ -36,11 +51,13 @@ export function ThemeMosaic({
   answers: Answers;
   revealCandidates: boolean;
   onToggleReveal: () => void;
+  // Thème dont on lit les propositions, ou `null` pour la mosaïque.
+  selectedTheme: ThemeTag | null;
+  onSelectTheme: (theme: ThemeTag | null) => void;
 }) {
   const colors = useColors();
   const getThemeColor = useThemeColor();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const [selectedTheme, setSelectedTheme] = useState<ThemeTag | null>(null);
 
   const { countByTheme, proposalsByTheme, themes } = useMemo(() => {
     const count: Record<string, number> = {};
@@ -119,7 +136,7 @@ export function ThemeMosaic({
       <View style={styles.detail}>
         <View style={styles.detailHeader}>
           <Pressable
-            onPress={() => setSelectedTheme(null)}
+            onPress={() => onSelectTheme(null)}
             hitSlop={8}
             style={({ pressed }) => [styles.detailBack, pressed && styles.detailBackPressed]}
             accessibilityRole="button"
@@ -187,7 +204,7 @@ export function ThemeMosaic({
         {themes.map((theme) => (
           <Pressable
             key={theme.id}
-            onPress={() => setSelectedTheme(theme)}
+            onPress={() => onSelectTheme(theme)}
             style={({ pressed }) => [
               styles.tile,
               { backgroundColor: getThemeColor(theme.id) },

@@ -8,6 +8,10 @@ import { ResultsScreen } from './ResultsScreen';
 import { ThemeSelectScreen } from './ThemeSelectScreen';
 import { SettingsScreen } from './SettingsScreen';
 import { HowItWorksScreen } from './HowItWorksScreen';
+import { DuelScreen } from './DuelScreen';
+import { CANDIDATES } from '../data/candidates';
+import { computeResults } from '../utils/scoring';
+import { encoderDuel } from '../utils/duel';
 import { ThemeProvider } from '../theme/ThemeContext';
 import { PROPOSALS } from '../data/proposals';
 import { THEMES, THEMES_BY_ID } from '../data/themes';
@@ -120,7 +124,7 @@ describe('montage des écrans', () => {
     expect(texts(tree).join(' ')).toContain('42');
   });
 
-  it('le swipe expose ses quatre onglets et le choix des thèmes', () => {
+  it('le swipe expose ses trois onglets et le choix des thèmes', () => {
     const tree = mount(
       <SwipeScreen
         proposals={DECK}
@@ -140,9 +144,12 @@ describe('montage des écrans', () => {
       />
     );
     const found = texts(tree);
-    for (const label of ['Swiper', 'Classement', 'Propositions', 'Candidats', 'Thèmes']) {
+    for (const label of ['Swiper', 'Classement', 'Propositions', 'Thèmes']) {
       expect(found).toContain(label);
     }
+    // « Candidats » a quitté la barre pour devenir une vue du panneau
+    // Classement : il ne doit plus y figurer comme onglet.
+    expect(found).not.toContain('Candidats');
   });
 
   it('le swipe sort vers l’accueil par le bouton du haut', () => {
@@ -276,6 +283,7 @@ describe('montage des écrans', () => {
         onGoHome={noop}
         onOpenHowItWorks={noop}
         onOpenSettings={noop}
+        onOpenDuel={noop}
         alreadyRevealed
         onReveal={noop}
       />
@@ -297,6 +305,7 @@ describe('montage des écrans', () => {
         onGoHome={() => sorties.push('accueil')}
         onOpenHowItWorks={noop}
         onOpenSettings={noop}
+        onOpenDuel={noop}
         alreadyRevealed
         onReveal={noop}
       />
@@ -378,5 +387,36 @@ describe('le voile sur les candidats', () => {
     for (const id of auteurs) {
       expect(rendu).not.toContain(noms[id]);
     }
+  });
+});
+
+describe('duel', () => {
+  // L'écran de duel rend un QR code entier, soit quelques centaines de vues
+  // imbriquées produites par un encodeur écrit à la main. C'est exactement le
+  // genre d'écran qui se monte en théorie et explose en pratique.
+  it('le duel affiche un code à montrer', () => {
+    const tree = mount(
+      <DuelScreen proposals={DECK} answers={ANSWERS} deckDone={false} codeRecu={null} onBack={noop} />
+    );
+    const rendu = texts(tree).join(' ');
+    expect(rendu).toContain('Ton code');
+    expect(rendu).toContain('Le code de l’autre');
+  });
+
+  it('le duel compare deux classements quand un code arrive par lien', () => {
+    // Le code de « l'autre » est fabriqué à partir de réponses différentes,
+    // pour que la comparaison ait quelque chose à montrer.
+    const autresReponses: Answers = Object.fromEntries(
+      DECK.slice(0, 20).map((p, i) => [p.id, (['nope', 'like'] as const)[i % 2]])
+    );
+    const code = encoderDuel(computeResults(autresReponses, DECK, CANDIDATES));
+
+    const tree = mount(
+      <DuelScreen proposals={DECK} answers={ANSWERS} deckDone codeRecu={code} onBack={noop} />
+    );
+    const rendu = texts(tree).join(' ');
+    expect(rendu).toContain('points d’écart en moyenne');
+    // Le QR code de saisie a laissé la place à la comparaison.
+    expect(rendu).not.toContain('Le code de l’autre');
   });
 });

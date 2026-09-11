@@ -86,6 +86,11 @@ export const LEGAL_DOCUMENTS: Record<LegalTopic, LegalDocument> = {
         body:
           'Le bouton « Partager » fabrique une image sur ton téléphone, puis te laisse choisir dans quelle application l’envoyer. Tant que tu ne choisis pas, l’image ne quitte pas l’appareil.',
       },
+      {
+        title: 'Le retour que tu envoies',
+        body:
+          'Signaler un bogue ou proposer une idée n’envoie rien depuis l’app : elle prépare un brouillon et l’ouvre dans ton application de messagerie. Tu le relis, tu le modifies, et tu l’envoies toi-même depuis ta propre adresse. Deux lignes techniques y sont ajoutées, affichées avant l’envoi : la version de l’app et le nom de ton système. Ni tes réponses, ni ton résultat, ni aucun identifiant.',
+      },
     ],
   },
 

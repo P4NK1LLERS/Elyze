@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Podium } from './Podium';
 import { ResultRow } from './ResultRow';
 import { ThemeAgreementList } from './ThemeAgreementList';
+import { CandidateGrid } from './CandidateGrid';
 import { CandidateResult, ThemeAgreement } from '../types';
 import { ColorTokens, fonts, radii, spacing } from '../theme';
 import { useColors } from '../theme/ThemeContext';
@@ -18,13 +19,19 @@ import { useColors } from '../theme/ThemeContext';
 //
 // Le sous-onglet vit ici, pas dans l'écran : il ne concerne que ce panneau, et
 // le remonter obligeait l'écran à tenir un état dont il ne faisait rien.
-type RankingView = 'overview' | 'byTheme';
+//
+// « Candidats » a rejoint ces vues en quittant la barre du bas, ou il tenait
+// un cinquieme onglet permanent pour un trombinoscope qui ne change jamais
+// (voir CandidateGrid). Sa place est ici : ce panneau est deja celui des
+// personnes, et on y touche un nom pour ouvrir la meme notice.
+type RankingView = 'overview' | 'byTheme' | 'candidats';
 
 export function RankingPanel({
   results,
   topMatch,
   confidenceLabel,
   themeAgreement,
+  deckDone,
   showCandidates,
   onSelectCandidate,
   onOpenCandidateInfo,
@@ -35,6 +42,8 @@ export function RankingPanel({
   topMatch: CandidateResult | null;
   confidenceLabel: string | null;
   themeAgreement: ThemeAgreement[];
+  // Plus une seule carte à répondre : le classement n'est plus provisoire.
+  deckDone: boolean;
   // Le classement peut nommer les candidats — c'est un agrégat, il ne dit pas
   // qui a écrit telle carte. La vue par thème, elle, s'en approche assez pour
   // devoir suivre la même bascule que la mosaïque (voir SwipeScreen).
@@ -46,27 +55,42 @@ export function RankingPanel({
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [view, setView] = useState<RankingView>('overview');
 
-  if (!topMatch) {
-    return (
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.emptyWrap}>
-          <Text style={styles.emptyEmoji}>🤔</Text>
-          <Text style={styles.emptyText}>
-            Pas encore assez de réponses pour un aperçu. Reviens sur l’onglet Swiper.
-          </Text>
-        </View>
-      </ScrollView>
-    );
-  }
+  // Le podium ne coiffe que les deux vues qui parlent de TES réponses. Au
+  // dessus du trombinoscope il donnerait à lire une grille alphabétique comme
+  // la suite d’un classement, ce qu’elle n’est pas.
+  const montrerPodium = topMatch !== null && view !== 'candidats';
+
+  // L’absence de résultat ne vide plus tout le panneau. Elle ne concerne que
+  // le classement et l’accord par thème ; les candidats, eux, sont
+  // consultables dès la première seconde et n’attendent aucune réponse.
+  const vide = (
+    <View style={styles.emptyWrap}>
+      <Text style={styles.emptyEmoji}>🤔</Text>
+      <Text style={styles.emptyText}>
+        Pas encore assez de réponses pour un aperçu. Reviens sur l’onglet Swiper.
+      </Text>
+    </View>
+  );
 
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <Text style={styles.hint}>
-        Provisoire, ça va encore bouger. Continue à répondre pour un résultat plus fiable.
-      </Text>
+      {/* « Continue à répondre » n'a plus de sens une fois la dernière carte
+          tranchée : il n'en reste aucune. La phrase invitait alors à une
+          action impossible, et laissait croire que le classement affiché
+          n'était pas le résultat final. Elle disparaît avec la raison qui la
+          justifiait. */}
+      {montrerPodium && !deckDone && (
+        <Text style={styles.hint}>
+          Provisoire, ça va encore bouger. Continue à répondre pour un résultat plus fiable.
+        </Text>
+      )}
 
-      <Podium results={results} instant onCandidatePress={onOpenCandidateInfo} />
-      {confidenceLabel && <Text style={styles.confidence}>{confidenceLabel}</Text>}
+      {montrerPodium && (
+        <>
+          <Podium results={results} instant onCandidatePress={onOpenCandidateInfo} />
+          {confidenceLabel && <Text style={styles.confidence}>{confidenceLabel}</Text>}
+        </>
+      )}
 
       <View style={styles.subTabRow}>
         <SubTab
@@ -83,9 +107,19 @@ export function RankingPanel({
           selected={view === 'byTheme'}
           onPress={() => setView('byTheme')}
         />
+        <SubTab
+          styles={styles}
+          label="Candidats"
+          accessibilityLabel="Qui sont les candidats comparés"
+          selected={view === 'candidats'}
+          onPress={() => setView('candidats')}
+        />
       </View>
 
-      {view === 'overview' ? (
+      {view === 'candidats' && <CandidateGrid onSelect={onOpenCandidateInfo} />}
+
+      {view === 'overview' &&
+        (topMatch ? (
         <View style={styles.listSection}>
           <Text style={styles.sectionTitle}>Qui a le plus de votes</Text>
           {results.map((result) => (
@@ -100,7 +134,12 @@ export function RankingPanel({
             />
           ))}
         </View>
-      ) : (
+        ) : (
+          vide
+        ))}
+
+      {view === 'byTheme' &&
+        (topMatch ? (
         <View style={styles.listSection}>
           <Text style={styles.sectionTitle}>Avec qui tu es d’accord, sujet par sujet</Text>
           <Text style={styles.sectionCaption}>
@@ -114,7 +153,9 @@ export function RankingPanel({
             hiddenNote="Les noms restent masqués tant que tu swipes. Tu peux les afficher depuis l’onglet Propositions."
           />
         </View>
-      )}
+        ) : (
+          vide
+        ))}
     </ScrollView>
   );
 }
@@ -140,7 +181,14 @@ function SubTab({
       accessibilityState={{ selected }}
       accessibilityLabel={accessibilityLabel}
     >
-      <Text style={[styles.subTabText, selected && styles.subTabTextActive]}>{label}</Text>
+      <Text
+        style={[styles.subTabText, selected && styles.subTabTextActive]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }

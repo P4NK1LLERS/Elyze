@@ -2,6 +2,7 @@
   "expo": {
     "name": "Élyze 2027",
     "slug": "elyze",
+    "scheme": "elyze",
     "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

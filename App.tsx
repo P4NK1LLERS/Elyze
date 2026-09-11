@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { BackHandler } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler, Linking } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -9,6 +9,7 @@ import { ThemeSelectScreen } from './src/screens/ThemeSelectScreen';
 import { SwipeScreen } from './src/screens/SwipeScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
 import { ResultsScreen } from './src/screens/ResultsScreen';
+import { DuelScreen } from './src/screens/DuelScreen';
 import { HowItWorksScreen } from './src/screens/HowItWorksScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
@@ -21,6 +22,7 @@ import { CANDIDATES } from './src/data/candidates';
 import { THEMES, THEMES_BY_ID } from './src/data/themes';
 import { buildDeck, QUOTA_PAR_CANDIDAT } from './src/utils/deck';
 import { computeResults, pickTopMatch, topMatches } from './src/utils/scoring';
+import { codeDepuisUrl } from './src/utils/duel';
 import {
   clearSession,
   hasSeenTutorial,
@@ -44,7 +46,8 @@ type Screen =
   | 'review'
   | 'results'
   | 'howItWorks'
-  | 'settings';
+  | 'settings'
+  | 'duel';
 
 const ALL_THEME_IDS = THEMES.map((t) => t.id);
 
@@ -93,14 +96,33 @@ function AppInner() {
   const [storedRestorable, setStoredRestorable] = useState<RestorableSummary | null>(null);
   const [pendingRestore, setPendingRestore] = useState<StoredSession | null>(null);
 
+  // Code de duel reçu par lien profond (elyze://d?c=…), le cas échéant.
+  const [duelCode, setDuelCode] = useState<string | null>(null);
+
   const [showTutorial, setShowTutorial] = useState(false);
   // Le "moment de révélation" (haptique + animations) de l'écran de résultat
   // ne doit jouer qu'une fois par résultat, pas à chaque retour sur l'écran
   // (ex. après avoir ouvert l'explorateur ou "Comment ça marche").
   const [resultsRevealed, setResultsRevealed] = useState(false);
 
+  // Où revenir en quittant le duel. Calculé plutôt que mémorisé : on y entre
+  // aussi bien depuis l'écran de résultat que par un lien profond ouvert
+  // l'app fermée, cas où aucun « écran précédent » n'a jamais existé.
+  const quitterDuel = useCallback(() => {
+    setDuelCode(null);
+    if (sessionProposals.length === 0) {
+      setScreen('intro');
+      return;
+    }
+    setScreen(currentIndex >= sessionProposals.length ? 'results' : 'swipe');
+  }, [sessionProposals.length, currentIndex]);
+
   useEffect(() => {
     const handler = () => {
+      if (screen === 'duel') {
+        quitterDuel();
+        return true;
+      }
       if (screen === 'settings') {
         setScreen(settingsReturnTo);
         return true;
@@ -137,7 +159,7 @@ function AppInner() {
     };
     const subscription = BackHandler.addEventListener('hardwareBackPress', handler);
     return () => subscription.remove();
-  }, [screen, howItWorksReturnTo, settingsReturnTo, themesReturnTo]);
+  }, [screen, howItWorksReturnTo, settingsReturnTo, themesReturnTo, quitterDuel]);
 
   // Au lancement, on ne passe PAS par l'accueil quand une partie est en cours.
   //
@@ -147,8 +169,37 @@ function AppInner() {
   // le cas normal — on swipe quelques minutes, on ferme, on y revient. On
   // reprend donc là où la session s'est arrêtée, et l'accueil reste à un
   // toucher (icône maison en haut à gauche).
+  // Un lien de duel l'emporte sur la reprise de session.
+  //
+  // Les deux se résolvent de façon asynchrone au démarrage et appellent tous
+  // deux `setScreen` : sans arbitre, c'est le plus lent qui gagne, et scanner
+  // le QR code d'un ami ouvrait l'app sur les cartes une fois sur deux. Cette
+  // marque est posée AVANT le `setScreen` du lien, donc de façon synchrone, et
+  // la reprise de session la consulte avant de décider quoi que ce soit.
+  const lienTraite = useRef(false);
+
+  useEffect(() => {
+    const traiter = (url: string | null) => {
+      if (!url) return;
+      const code = codeDepuisUrl(url);
+      if (!code) return;
+      lienTraite.current = true;
+      setDuelCode(code);
+      setScreen('duel');
+    };
+
+    // Lien qui a lancé l'app (elle était fermée)…
+    Linking.getInitialURL()
+      .then(traiter)
+      .catch(() => {});
+    // …et lien reçu alors qu'elle tournait déjà.
+    const abonnement = Linking.addEventListener('url', (evenement) => traiter(evenement.url));
+    return () => abonnement.remove();
+  }, []);
+
   useEffect(() => {
     loadSession().then((session) => {
+      if (lienTraite.current) return;
       if (!session) {
         setScreen('intro');
         return;
@@ -190,7 +241,9 @@ function AppInner() {
       // révélation : ce moment appartient à la fois où le paquet s'est
       // terminé, pas à chaque ouverture de l'app.
       setResultsRevealed(isComplete);
-      setScreen(isComplete ? 'results' : 'swipe');
+      // Une dernière fois : la lecture de la session a pu prendre plus
+      // longtemps que celle du lien.
+      if (!lienTraite.current) setScreen(isComplete ? 'results' : 'swipe');
     });
 
     hasSeenTutorial().then((seen) => setShowTutorial(!seen));
@@ -462,8 +515,23 @@ function AppInner() {
                 onGoHome={() => setScreen('intro')}
                 onOpenHowItWorks={openHowItWorks}
                 onOpenSettings={openSettings}
+                onOpenDuel={() => setScreen('duel')}
                 alreadyRevealed={resultsRevealed}
                 onReveal={() => setResultsRevealed(true)}
+              />
+            </ScreenTransition>
+          )}
+
+          {screen === 'duel' && (
+            <ScreenTransition>
+              <DuelScreen
+                proposals={sessionProposals}
+                answers={answers}
+                deckDone={
+                  sessionProposals.length > 0 && currentIndex >= sessionProposals.length
+                }
+                codeRecu={duelCode}
+                onBack={quitterDuel}
               />
             </ScreenTransition>
           )}

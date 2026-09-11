@@ -4,7 +4,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { FeedbackDialog } from '../components/FeedbackDialog';
 import { LegalScreen } from './LegalScreen';
+import { APP_VERSION } from '../data/appInfo';
 import { LEGAL_DOCUMENTS, LEGAL_TOPICS, LegalTopic } from '../data/legal';
 import { ACCENT_PRESETS, ColorTokens, fonts, radii, spacing } from '../theme';
 import { useColors, useThemeSettings } from '../theme/ThemeContext';
@@ -48,6 +50,7 @@ export function SettingsScreen({
   } = useThemeSettings();
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [legalTopic, setLegalTopic] = useState<LegalTopic | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -82,36 +85,36 @@ export function SettingsScreen({
           </View>
         </View>
 
-        {/* Réglage ORDINAIRE, visible sans rien avoir à débloquer : c'est
-            une préférence d'apparence. Le mode « couleurs au hasard » juste
-            en dessous reste, lui, derrière l'easter egg de l'accueil — les
-            deux sont indépendants et se cumulent. */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Dégradé arc-en-ciel</Text>
-          <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>Fond animé</Text>
-            <Switch
-              value={gradientEnabled}
-              onValueChange={setGradientEnabled}
-              trackColor={{ false: colors.border, true: colors.accent }}
-              thumbColor="#FFFFFF"
-              ios_backgroundColor={colors.border}
-              accessibilityLabel="Activer le dégradé arc-en-ciel animé"
-            />
-          </View>
-          <Text style={styles.sectionCaption}>
-            Un dégradé multicolore parcourt lentement le cadre des cartes et la barre de
-            progression. Le fond des cartes n’est que teinté : au-delà, le texte cesserait
-            d’être lisible. Le mouvement s’arrête si ton système demande de réduire les
-            animations.
-          </Text>
-        </View>
-
-        {/* Section absente tant que l'easter egg de l'accueil n'a pas été
-            trouvé : c'est ce qui en fait une découverte. */}
+        {/* TOUT L'ARC-EN-CIEL EST DERRIÈRE L'EASTER EGG, fond animé compris.
+            Le dégradé vivait jusqu'ici dans une section ordinaire, au-dessus
+            de celle que l'egg débloque : deux sections voisines, au nom
+            presque identique, dont l'une apparaissait et l'autre pas. Ce
+            qu'on découvrait n'était donc pas « l'arc-en-ciel » mais sa
+            moitié, et l'egg semblait n'avoir rien apporté à qui avait déjà
+            allumé le fond animé. Les deux réglages sont désormais la même
+            trouvaille, dans le même bloc. */}
         {rainbowUnlocked && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Mode arc-en-ciel</Text>
+
+            <View style={styles.switchRow}>
+              <Text style={styles.switchLabel}>Fond animé</Text>
+              <Switch
+                value={gradientEnabled}
+                onValueChange={setGradientEnabled}
+                trackColor={{ false: colors.border, true: colors.accent }}
+                thumbColor="#FFFFFF"
+                ios_backgroundColor={colors.border}
+                accessibilityLabel="Activer le dégradé arc-en-ciel animé"
+              />
+            </View>
+            <Text style={styles.sectionCaption}>
+              Un dégradé multicolore parcourt lentement le cadre des cartes et la barre de
+              progression. Le fond des cartes n’est que teinté : au-delà, le texte cesserait
+              d’être lisible. Le mouvement s’arrête si ton système demande de réduire les
+              animations.
+            </Text>
+
             <View style={styles.switchRow}>
               <Text style={styles.switchLabel}>Couleurs au hasard</Text>
               <Switch
@@ -127,6 +130,7 @@ export function SettingsScreen({
               Repeint toute l’application avec des couleurs tirées au sort. Les teintes changent,
               mais chaque texte reste lisible sur son fond.
             </Text>
+
             {rainbowEnabled && (
               <Pressable
                 onPress={rerollRainbow}
@@ -186,6 +190,33 @@ export function SettingsScreen({
           </View>
         </View>
 
+        {/* Un retour, et une seule porte pour les trois.
+            Bogue, idée et avis partagent le même geste — écrire à quelqu'un —
+            et trois entrées distinctes dans les réglages auraient obligé à
+            trancher avant d'avoir écrit, là où la nature du message est
+            souvent claire seulement une fois rédigé. Le choix se fait donc
+            dans la boîte, où il reste modifiable. */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Ton avis</Text>
+          <Pressable
+            onPress={() => setFeedbackOpen(true)}
+            style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Signaler un bogue, proposer une idée ou donner un avis"
+          >
+            <Ionicons name="chatbubble-ellipses-outline" size={19} color={colors.accentText} />
+            <View style={styles.rowTexts}>
+              <Text style={[styles.rowLabel, styles.rowLabelStacked]}>
+                Signaler un bogue ou proposer une idée
+              </Text>
+              <Text style={styles.rowHint}>
+                Prépare un message dans ton application de messagerie. L’app n’envoie rien.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={17} color={colors.textMuted} />
+          </Pressable>
+        </View>
+
         {/* Confidentialité, conditions, crédits. Trois pages plutôt qu'une :
             elles ne se lisent pas dans les mêmes circonstances, et un seul
             pavé de mentions légales ne se lit pas du tout. */}
@@ -206,6 +237,8 @@ export function SettingsScreen({
               </Pressable>
             ))}
           </View>
+          {/* La version, là où on la cherche quand on veut la donner. */}
+          <Text style={styles.sectionCaption}>Version {APP_VERSION}</Text>
         </View>
 
         <View style={styles.section}>
@@ -223,6 +256,8 @@ export function SettingsScreen({
       </ScrollView>
 
       <LegalScreen topic={legalTopic} onClose={() => setLegalTopic(null)} />
+
+      <FeedbackDialog visible={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
 
       <ConfirmDialog
         visible={confirmingReset}
@@ -332,8 +367,12 @@ function makeStyles(colors: ColorTokens) {
       fontWeight: '600',
       color: colors.textSecondary,
     },
+    // Les trois textes légaux sont des DESTINATIONS distinctes, pas les trois
+    // lignes d'une même liste : à 2 px d'écart, leurs fonds se touchaient et
+    // le bloc se lisait comme un seul pavé gris coupé par deux traits. Un
+    // intervalle franc, celui qui sépare déjà les autres blocs de l'écran.
     rows: {
-      gap: 2,
+      gap: spacing.sm,
     },
     row: {
       flexDirection: 'row',
@@ -347,11 +386,27 @@ function makeStyles(colors: ColorTokens) {
     rowPressed: {
       opacity: 0.7,
     },
+    // Une rangée peut porter un sous-titre : `rowTexts` prend alors le `flex`
+    // que le libellé tenait seul, sinon les deux textes se tassent à gauche.
+    rowTexts: {
+      flex: 1,
+      gap: 2,
+    },
     rowLabel: {
       flex: 1,
       fontSize: fonts.small + 1,
       fontWeight: '600',
       color: colors.textPrimary,
+    },
+    // Empilé sous un sous-titre, le libellé ne doit plus s'étirer : `flex: 1`
+    // dans une colonne le fait grandir en HAUTEUR et décolle le sous-titre.
+    rowLabelStacked: {
+      flex: 0,
+    },
+    rowHint: {
+      fontSize: fonts.tiny,
+      lineHeight: fonts.tiny * 1.4,
+      color: colors.textSecondary,
     },
     switchRow: {
       flexDirection: 'row',

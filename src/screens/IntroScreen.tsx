@@ -342,7 +342,6 @@ export function IntroScreen({
         title="Recommencer à zéro ?"
         message="Ta session en cours sera effacée définitivement."
         confirmLabel="Recommencer"
-        destructive
         onConfirm={handleConfirmRestart}
         onCancel={() => setConfirmingRestart(false)}
       />
@@ -350,7 +349,7 @@ export function IntroScreen({
       <ConfirmDialog
         visible={secretRevealed}
         title="🌈 Mode arc-en-ciel débloqué !"
-        message="Sept appuis sur le titre, bien joué. L’app peut désormais se repeindre entièrement avec des couleurs tirées au sort, autant de fois que tu veux. Le réglage rejoint tes paramètres, tu peux l’activer quand ça te chante."
+        message="Sept appuis sur le titre, bien joué. Deux réglages viennent d’apparaître dans tes paramètres : un fond animé, où un dégradé multicolore parcourt lentement les cartes, et le mode couleurs au hasard, qui repeint toute l’app à chaque tirage. Ils se cumulent, et s’éteignent aussi facilement."
         confirmLabel="Activer maintenant"
         cancelLabel="Plus tard"
         onConfirm={() => {
@@ -599,10 +598,15 @@ function makeStyles(colors: ColorTokens) {
       alignItems: 'center',
       paddingVertical: spacing.xs,
     },
+    // L'ACCENT CHOISI DANS LES RÉGLAGES, et non un gris de service.
+    // Recommencer est une action ordinaire et volontaire : la teinte de l'app
+    // est ce qui dit « ceci se touche ». En `textMuted`, ce lien portait la
+    // couleur des mentions qu'on ne touche pas — juste au-dessous du bouton
+    // « Reprendre », il passait pour une légende de celui-ci.
     restartLink: {
       fontSize: fonts.small,
-      fontWeight: '600',
-      color: colors.textMuted,
+      fontWeight: '700',
+      color: colors.accentText,
     },
     disclaimer: {
       fontSize: fonts.tiny,

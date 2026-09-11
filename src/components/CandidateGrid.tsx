@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from './Avatar';
 import { CANDIDATES } from '../data/candidates';
@@ -32,12 +32,32 @@ import { useColors } from '../theme/ThemeContext';
 // propose quoi — c'est cela seul que l'app protège — et la fiche détaillée
 // masque de son côté la liste des sujets abordés tant que le paquet n'est pas
 // terminé.
+// PLUS D'ONGLET À ELLE : cette grille est une vue du panneau Classement.
+//
+// Elle a occupé le cinquième bouton de la barre du bas, et il ne le méritait
+// pas. Ce qu'elle montre — onze photos, onze noms, onze partis — se consulte
+// une fois et ne change jamais : ni score, ni compte, ni réponse, rien qui
+// évolue d'une visite à l'autre. Un onglet permanent promet le contraire, et
+// il le promettait au prix du seul libellé long de la barre, « Propositions »,
+// qui devait rétrécir pour tenir à cinq.
+//
+// Elle avait en outre un effet qu'aucune autre vue n'a : mettre onze visages
+// devant quelqu'un dont le travail, à cet instant, est de juger des textes
+// sans savoir de qui ils sont. Rien n'était révélé, mais rien n'y invitait.
+//
+// Elle n'est pas supprimée pour autant : la savoir accessible est une
+// garantie de transparence sur qui est comparé, et les notices Wikipédia
+// n'ont pas d'autre porte d'entrée avant la fin du paquet. Elle rejoint donc
+// le panneau qui parle déjà des personnes, à un toucher de là.
+//
+// Sans ScrollView : c'est le panneau qui défile, et deux zones de défilement
+// vertical imbriquées se disputent le geste.
 export function CandidateGrid({ onSelect }: { onSelect: (candidateId: string) => void }) {
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+    <View style={styles.wrap}>
       <View style={styles.intro}>
         <Text style={styles.title}>Les {CANDIDATES.length} candidats</Text>
         <Text style={styles.caption}>
@@ -60,11 +80,11 @@ export function CandidateGrid({ onSelect }: { onSelect: (candidateId: string) =>
       <View style={styles.footer}>
         <Ionicons name="information-circle-outline" size={15} color={colors.textSecondary} />
         <Text style={styles.footerText}>
-          Ordre alphabétique. Ce n’est pas un classement : le tien est dans l’onglet
-          Classement.
+          Ordre alphabétique. Ce n’est pas un classement : le tien est juste à côté, dans
+          « Classement ».
         </Text>
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -116,9 +136,7 @@ const MAX_TILE_SCALE = 1.5;
 
 function makeStyles(colors: ColorTokens) {
   return StyleSheet.create({
-    scroll: {
-      paddingHorizontal: spacing.lg,
-      paddingBottom: spacing.xl,
+    wrap: {
       gap: spacing.md,
     },
     intro: {

@@ -51,6 +51,7 @@ export function ResultsScreen({
   onGoHome,
   onOpenHowItWorks,
   onOpenSettings,
+  onOpenDuel,
   alreadyRevealed,
   onReveal,
 }: {
@@ -64,6 +65,8 @@ export function ResultsScreen({
   onGoHome: () => void;
   onOpenHowItWorks: () => void;
   onOpenSettings: () => void;
+  // Comparer son classement à celui de quelqu'un d'autre (écran Duel).
+  onOpenDuel: () => void;
   // Le "moment de révélation" (haptique + animations d'entrée) ne doit avoir
   // lieu qu'une fois par résultat, pas à chaque fois qu'on revient sur cet
   // écran depuis "Comment ça marche" — voir App.tsx.
@@ -396,6 +399,28 @@ export function ResultsScreen({
           </View>
         )}
 
+        {/* LE DUEL EST ICI, ET PAS DANS LE PIED DE PAGE.
+            La rangée du bas porte déjà « Accueil » et « Partager », deux
+            boutons qui se partagent une largeur fixe ; un troisième les aurait
+            réduits à des libellés tronqués. Surtout, comparer son classement à
+            celui de quelqu'un se décide APRÈS l'avoir lu, pas en même temps
+            qu'on cherche la sortie : sa place est à la fin de la lecture. */}
+        <Pressable
+          onPress={onOpenDuel}
+          style={({ pressed }) => [styles.duelButton, pressed && styles.duelPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Comparer ton classement à celui de quelqu’un d’autre"
+        >
+          <Ionicons name="git-compare-outline" size={20} color={colors.accentText} />
+          <View style={styles.duelTexts}>
+            <Text style={styles.duelTitle}>Comparer avec quelqu’un</Text>
+            <Text style={styles.duelHint}>
+              Un QR code à faire scanner, et vos deux classements côte à côte.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.accentText} />
+        </Pressable>
+
         <Text style={styles.footnote}>
           Propositions recensées par Poligraph (poligraph.fr), à raison du même nombre par
           candidat. Le pourcentage reflète uniquement les propositions présentées dans cette
@@ -638,6 +663,32 @@ function makeStyles(colors: ColorTokens) {
     footerRow: {
       flexDirection: 'row',
       gap: spacing.md,
+    },
+    duelButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+      backgroundColor: colors.accentSoft,
+      borderRadius: radii.lg,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+    },
+    duelPressed: {
+      opacity: 0.7,
+    },
+    duelTexts: {
+      flex: 1,
+      gap: 2,
+    },
+    duelTitle: {
+      fontSize: fonts.small + 1,
+      fontWeight: '800',
+      color: colors.accentText,
+    },
+    duelHint: {
+      fontSize: fonts.tiny,
+      lineHeight: fonts.tiny * 1.4,
+      color: colors.accentText,
     },
     restartButton: {
       flex: 1,
