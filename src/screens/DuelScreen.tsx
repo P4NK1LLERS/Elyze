@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
+  Keyboard,
   Pressable,
   ScrollView,
   Share,
@@ -34,6 +33,13 @@ import {
 import { Answers, Proposal } from '../types';
 import { ColorTokens, fonts, radii, spacing } from '../theme';
 import { useColors } from '../theme/ThemeContext';
+
+// Hauteur réservée sous le contenu pendant la saisie, quand le système ne
+// dit pas celle du clavier. Un clavier de téléphone en portrait fait entre 260
+// et 340 points selon l'appareil et la langue ; on prend le haut de la
+// fourchette, le trop-plein ne se voyant que sous la forme d'un peu de vide
+// sous le dernier bloc.
+const RESERVE_CLAVIER = 340;
 
 // Le duel : mettre son classement à côté de celui de quelqu'un d'autre.
 //
@@ -84,6 +90,9 @@ export function DuelScreen({
   const [saisie, setSaisie] = useState('');
   const defilement = useRef<ScrollView>(null);
   const champ = useRef<TextInput>(null);
+  // Hauteur à réserver sous le contenu pendant la saisie. Zéro le reste du
+  // temps (voir RESERVE_CLAVIER et l'effet plus bas).
+  const [reserve, setReserve] = useState(0);
   const [erreur, setErreur] = useState<string | null>(null);
   const [autre, setAutre] = useState<DuelResultat | null>(null);
   // « Copié » remplace le libellé du bouton pendant deux secondes.
@@ -133,14 +142,48 @@ export function DuelScreen({
     if (codeRecu) lire(codeRecu);
   }, [codeRecu, lire]);
 
-  // Le champ est le dernier bloc de l'écran : l'amener en bas de la zone
-  // visible suffit à le dégager du clavier, quelle que soit la hauteur de
-  // celui-ci. Le délai laisse le temps au clavier de s'ouvrir, donc à la mise
-  // en page de se réduire, faute de quoi on ferait défiler vers une fin
-  // d'écran qui n'est pas encore la bonne.
   // Le compte y est : ni trop court, ni tronqué.
   const complet = saisie.length === DUEL_CODE_LENGTH;
 
+  // POURQUOI RÉSERVER DE LA PLACE PLUTÔT QUE DE FAIRE DÉFILER.
+  //
+  // Le champ est le dernier bloc de l'écran, et une première correction se
+  // contentait donc de faire défiler jusqu'en bas à la prise de focus. Sur un
+  // téléphone, le champ restait sous le clavier — et la raison est instructive.
+  //
+  // Depuis le SDK 54, le mode bord à bord est actif par défaut sur Android
+  // (`edgeToEdgeEnabled`, que la version 16 rendra obligatoire). Dans ce mode
+  // le système NE REDIMENSIONNE PLUS la fenêtre à l'ouverture du clavier :
+  // l'application continue de dessiner sur toute la hauteur de l'écran, et le
+  // clavier se pose par-dessus. Le défilement atteignait donc bien le bas du
+  // contenu ; simplement, ce bas était derrière le clavier. Faire défiler plus
+  // n'y aurait rien changé, puisqu'il n'y avait plus rien à découvrir.
+  //
+  // Il faut donc AJOUTER de la hauteur sous le contenu, pour que le champ ait
+  // où remonter. C'est ce que fait ce rembourrage, et le défilement redevient
+  // alors efficace.
+  //
+  // On le dimensionne sur la hauteur réelle du clavier quand le système la
+  // donne, avec un plancher pour le cas où il ne la donnerait pas : une
+  // réserve un peu trop grande ne coûte qu'un peu de vide sous le champ,
+  // là où une réserve absente ramène le défaut d'origine.
+  useEffect(() => {
+    const montre = Keyboard.addListener('keyboardDidShow', (evenement) => {
+      setReserve(Math.max(evenement.endCoordinates?.height ?? 0, RESERVE_CLAVIER));
+      // Le défilement vient APRÈS le rembourrage : l'inverse ferait défiler
+      // vers un bas d'écran qui n'a pas encore grandi.
+      setTimeout(() => defilement.current?.scrollToEnd({ animated: true }), 60);
+    });
+    const cache = Keyboard.addListener('keyboardDidHide', () => setReserve(0));
+    return () => {
+      montre.remove();
+      cache.remove();
+    };
+  }, []);
+
+  // Le clavier peut déjà être ouvert quand on touche le champ (on revient d'un
+  // autre champ, ou il n'a jamais été refermé) : « keyboardDidShow » ne se
+  // déclenche alors pas, et il faut redemander le défilement soi-même.
   const remonterLeChamp = () => {
     setTimeout(() => defilement.current?.scrollToEnd({ animated: true }), 250);
   };
@@ -201,23 +244,9 @@ export function DuelScreen({
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <ScreenHeader title="Duel" onBack={onBack} />
 
-      {/* LE CLAVIER RECOUVRAIT LE CHAMP, qui est le dernier bloc de l'écran.
-          On tapait donc un code de vingt-six caractères à l'aveugle, sans
-          pouvoir le relire ni le comparer à celui qu'on recopiait — c'est-à-
-          dire en étant sûr de finir par une faute qu'on ne verrait pas.
-
-          Deux mécanismes, un par plateforme. Sur iOS le clavier se pose PAR
-          DESSUS la page sans rien déplacer : `padding` réserve sa hauteur en
-          bas de la vue, ce qui raccourcit la zone défilante d'autant. Sur
-          Android le système redimensionne déjà la fenêtre, et lui ajouter un
-          rembourrage la réduirait deux fois. */}
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
       <ScrollView
         ref={defilement}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: spacing.xxl + reserve }]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
@@ -369,7 +398,6 @@ export function DuelScreen({
           est dans les caractères que vous échangez.
         </Text>
       </ScrollView>
-      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
