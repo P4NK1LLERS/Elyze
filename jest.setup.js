@@ -55,3 +55,11 @@ jest.mock('react-native-safe-area-context', () => {
 // suffit : les tests vérifient les couleurs qu'on lui passe, pas le dégradé
 // qu'il peint.
 jest.mock('expo-linear-gradient', () => ({ LinearGradient: 'LinearGradient' }));
+
+// Le presse-papier est un module natif. Un substitut inerte suffit : les tests
+// vérifient que le bouton existe et appelle quelque chose, pas que le système
+// a bien retenu la chaîne.
+jest.mock('expo-clipboard', () => ({
+  setStringAsync: jest.fn(() => Promise.resolve(true)),
+  getStringAsync: jest.fn(() => Promise.resolve('')),
+}));

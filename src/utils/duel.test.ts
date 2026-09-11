@@ -2,6 +2,7 @@ import { CANDIDATES } from '../data/candidates';
 import { CandidateResult } from '../types';
 import {
   codeDepuisUrl,
+  codeLignes,
   codeLisible,
   comparerDuel,
   decoderDuel,
@@ -178,5 +179,19 @@ describe('comparaison', () => {
     expect(vu.ecartMoyen).toBeNull();
     expect(vu.sesPremiers).toEqual([]);
     expect(vu.memePremier).toBe(false);
+  });
+});
+
+describe('affichage du code', () => {
+  it('coupe en deux lignes équilibrées, jamais au milieu d’un groupe', () => {
+    const code = encoderDuel(classement(TOUS));
+    const [haut, bas] = codeLignes(code);
+    // Rien n'est perdu ni ajouté entre les deux lignes.
+    expect((haut + bas).replace(/ /g, '')).toBe(code);
+    // Aucun groupe n'est coupé : tous font quatre caractères, sauf le dernier.
+    const groupes = [...haut.split(' '), ...bas.split(' ')];
+    expect(groupes.slice(0, -1).every((g) => g.length === 4)).toBe(true);
+    // Les deux lignes se ressemblent : au plus un groupe d'écart.
+    expect(Math.abs(haut.split(' ').length - bas.split(' ').length)).toBeLessThanOrEqual(1);
   });
 });

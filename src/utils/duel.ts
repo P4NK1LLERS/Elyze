@@ -199,6 +199,19 @@ export function codeLisible(code: string): string {
   return (code.match(/.{1,4}/g) ?? []).join(' ');
 }
 
+// Le même code, réparti sur DEUX LIGNES ÉQUILIBRÉES.
+//
+// Vingt-six caractères font sept groupes, dont le dernier n'en compte que
+// deux. Laissé au retour à la ligne automatique, il se retrouvait seul sur sa
+// propre ligne, sous six groupes serrés : on lisait « WM » orphelin sous le
+// QR code, et plus rien n'avait l'air d'être un code. La coupe est donc
+// décidée ici, au milieu des groupes, jamais à l'intérieur de l'un d'eux.
+export function codeLignes(code: string): [string, string] {
+  const groupes = code.match(/.{1,4}/g) ?? [];
+  const coupe = Math.ceil(groupes.length / 2);
+  return [groupes.slice(0, coupe).join(' '), groupes.slice(coupe).join(' ')];
+}
+
 // --- Comparaison ------------------------------------------------------------
 
 export type DuelLigne = {

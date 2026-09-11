@@ -1,13 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
+import { haptics } from '../utils/haptics';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { QrCode } from '../components/QrCode';
 import { Avatar } from '../components/Avatar';
 import { CANDIDATES } from '../data/candidates';
 import { computeResults } from '../utils/scoring';
 import {
+  codeLignes,
   codeLisible,
   comparerDuel,
   decoderDuel,
@@ -67,6 +70,20 @@ export function DuelScreen({
   const [saisie, setSaisie] = useState('');
   const [erreur, setErreur] = useState<string | null>(null);
   const [autre, setAutre] = useState<DuelResultat | null>(null);
+  // « Copié » remplace le libellé du bouton pendant deux secondes.
+  //
+  // Sans cet aveu, copier ne produit RIEN de perceptible : le presse-papier
+  // est invisible, et l'appui se lit comme un bouton mort. Android affiche
+  // parfois un message système, iOS jamais, et sur aucun des deux on ne peut
+  // compter.
+  const [copie, setCopie] = useState(false);
+  const minuteurCopie = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (minuteurCopie.current) clearTimeout(minuteurCopie.current);
+    },
+    []
+  );
 
   const lire = useMemo(
     () => (code: string) => {
@@ -110,6 +127,25 @@ export function DuelScreen({
     Share.share({
       message: `Compare ton classement Élyze au mien : ${duelUrl(monCode)}\n\nOu entre ce code dans l’app : ${codeLisible(monCode)}`,
     }).catch(() => {});
+  };
+
+  // COPIER NE MET QUE LE CODE, sans la phrase qui l'accompagne dans le
+  // partage. Les deux gestes ne servent pas la même chose : on partage vers
+  // quelqu'un qui découvre l'app et a besoin du lien et d'une explication, on
+  // copie pour recoller le code soi-même quelque part, dans une conversation
+  // déjà en cours ou dans le champ de l'autre téléphone. Y joindre un message
+  // obligerait alors à faire le ménage après collage.
+  //
+  // C'est la forme AFFICHÉE qui est copiée, groupes de quatre compris : ce
+  // qu'on lit à l'écran est ce qu'on obtient, et la lecture du code ignore de
+  // toute façon les espaces.
+  const copier = () => {
+    if (!monCode) return;
+    Clipboard.setStringAsync(codeLisible(monCode)).catch(() => {});
+    haptics.selection();
+    setCopie(true);
+    if (minuteurCopie.current) clearTimeout(minuteurCopie.current);
+    minuteurCopie.current = setTimeout(() => setCopie(false), 2000);
   };
 
   if (comparaison && autre) {
@@ -159,19 +195,42 @@ export function DuelScreen({
               <QrCode value={duelUrl(monCode)} size={240} />
             </View>
 
-            <Text style={styles.code} selectable>
-              {codeLisible(monCode)}
-            </Text>
+            <View style={styles.codeBloc}>
+              {codeLignes(monCode).map((ligne) => (
+                <Text key={ligne} style={styles.code} selectable>
+                  {ligne}
+                </Text>
+              ))}
+            </View>
 
-            <Pressable
-              onPress={partager}
-              style={({ pressed }) => [styles.secondaire, pressed && styles.presse]}
-              accessibilityRole="button"
-              accessibilityLabel="Envoyer mon code de duel"
-            >
-              <Ionicons name="share-outline" size={17} color={colors.accentText} />
-              <Text style={styles.secondaireTexte}>Envoyer le code</Text>
-            </Pressable>
+            <View style={styles.rangeeBoutons}>
+              <Pressable
+                onPress={copier}
+                style={({ pressed }) => [styles.secondaire, styles.moitie, pressed && styles.presse]}
+                accessibilityRole="button"
+                accessibilityLabel={copie ? 'Code copié' : 'Copier le code seul'}
+              >
+                <Ionicons
+                  name={copie ? 'checkmark' : 'copy-outline'}
+                  size={17}
+                  color={colors.accentText}
+                />
+                <Text style={styles.secondaireTexte} numberOfLines={1}>
+                  {copie ? 'Copié' : 'Copier'}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={partager}
+                style={({ pressed }) => [styles.secondaire, styles.moitie, pressed && styles.presse]}
+                accessibilityRole="button"
+                accessibilityLabel="Envoyer le code avec un message"
+              >
+                <Ionicons name="share-outline" size={17} color={colors.accentText} />
+                <Text style={styles.secondaireTexte} numberOfLines={1}>
+                  Envoyer
+                </Text>
+              </Pressable>
+            </View>
 
             {!deckDone && (
               <View style={styles.avertissement}>
@@ -443,6 +502,11 @@ function makeStyles(colors: ColorTokens) {
       alignItems: 'center',
       paddingVertical: spacing.sm,
     },
+    codeBloc: {
+      alignItems: 'center',
+      gap: 2,
+      paddingVertical: spacing.xs,
+    },
     // Le code en clair, en chasse fixe et bien espacé : il est fait pour être
     // recopié caractère par caractère par quelqu'un qui regarde un écran.
     code: {
@@ -482,6 +546,16 @@ function makeStyles(colors: ColorTokens) {
       fontSize: fonts.body,
       fontWeight: '700',
       color: colors.onAccent,
+    },
+    rangeeBoutons: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+    },
+    // Les deux actions se valent : même poids visuel, même largeur. Donner le
+    // plein d'accent à l'une des deux dirait qu'elle est la bonne, alors que
+    // le choix dépend seulement de ce qu'on fait ensuite du code.
+    moitie: {
+      flex: 1,
     },
     secondaire: {
       flexDirection: 'row',
