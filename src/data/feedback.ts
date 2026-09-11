@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { APP_VERSION } from './appInfo';
 
-// Envoyer un retour : bogue, idée, ou simple commentaire.
+// Envoyer un retour : bug, idée, ou simple commentaire.
 //
 // POURQUOI UN COURRIEL ET PAS UN FORMULAIRE.
 //
@@ -18,7 +18,7 @@ import { APP_VERSION } from './appInfo';
 //
 // CE QUI EST JOINT AU MESSAGE, ET RIEN D'AUTRE : la version de l'app et le
 // système. Deux lignes, visibles dans le brouillon avant envoi, qui évitent
-// l'aller-retour « quelle version ? » sur tout rapport de bogue. Ni réponses,
+// l'aller-retour « quelle version ? » sur tout rapport de bug. Ni réponses,
 // ni résultat, ni identifiant : ils ne diraient rien d'utile sur un défaut
 // d'affichage, et l'app n'a de toute façon rien de tel à donner.
 export const FEEDBACK_EMAIL = 'vfalchun@gmail.com';
@@ -39,8 +39,8 @@ export type FeedbackKindInfo = {
 export const FEEDBACK_KINDS: FeedbackKindInfo[] = [
   {
     kind: 'bug',
-    label: 'Un bogue',
-    subject: 'Bogue',
+    label: 'Un bug',
+    subject: 'Bug',
     placeholder:
       'Ce qui s’est passé, et ce que tu faisais juste avant. Si tu peux le refaire à volonté, dis-le : c’est le renseignement le plus utile.',
   },

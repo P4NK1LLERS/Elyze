@@ -89,7 +89,7 @@ export const LEGAL_DOCUMENTS: Record<LegalTopic, LegalDocument> = {
       {
         title: 'Le retour que tu envoies',
         body:
-          'Signaler un bogue ou proposer une idée n’envoie rien depuis l’app : elle prépare un brouillon et l’ouvre dans ton application de messagerie. Tu le relis, tu le modifies, et tu l’envoies toi-même depuis ta propre adresse. Deux lignes techniques y sont ajoutées, affichées avant l’envoi : la version de l’app et le nom de ton système. Ni tes réponses, ni ton résultat, ni aucun identifiant.',
+          'Signaler un bug ou proposer une idée n’envoie rien depuis l’app : elle prépare un brouillon et l’ouvre dans ton application de messagerie. Tu le relis, tu le modifies, et tu l’envoies toi-même depuis ta propre adresse. Deux lignes techniques y sont ajoutées, affichées avant l’envoi : la version de l’app et le nom de ton système. Ni tes réponses, ni ton résultat, ni aucun identifiant.',
       },
     ],
   },

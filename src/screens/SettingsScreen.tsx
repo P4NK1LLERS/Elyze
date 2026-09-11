@@ -191,7 +191,7 @@ export function SettingsScreen({
         </View>
 
         {/* Un retour, et une seule porte pour les trois.
-            Bogue, idée et avis partagent le même geste — écrire à quelqu'un —
+            Bug, idée et avis partagent le même geste — écrire à quelqu'un —
             et trois entrées distinctes dans les réglages auraient obligé à
             trancher avant d'avoir écrit, là où la nature du message est
             souvent claire seulement une fois rédigé. Le choix se fait donc
@@ -202,12 +202,12 @@ export function SettingsScreen({
             onPress={() => setFeedbackOpen(true)}
             style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
             accessibilityRole="button"
-            accessibilityLabel="Signaler un bogue, proposer une idée ou donner un avis"
+            accessibilityLabel="Signaler un bug, proposer une idée ou donner un avis"
           >
             <Ionicons name="chatbubble-ellipses-outline" size={19} color={colors.accentText} />
             <View style={styles.rowTexts}>
               <Text style={[styles.rowLabel, styles.rowLabelStacked]}>
-                Signaler un bogue ou proposer une idée
+                Signaler un bug ou proposer une idée
               </Text>
               <Text style={styles.rowHint}>
                 Prépare un message dans ton application de messagerie. L’app n’envoie rien.

@@ -13,7 +13,6 @@ import { DuelScreen } from './src/screens/DuelScreen';
 import { HowItWorksScreen } from './src/screens/HowItWorksScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
-import { IntroAnimation } from './src/components/IntroAnimation';
 import { ScreenTransition } from './src/components/ScreenTransition';
 import { SwipeDirection } from './src/components/SwipeCard';
 import { Answers, Proposal } from './src/types';
@@ -51,9 +50,8 @@ type Screen =
 
 const ALL_THEME_IDS = THEMES.map((t) => t.id);
 
-// L'écran natif ne se retire plus tout seul : sinon il disparaîtrait avant
-// que l'animation du logo ne soit à l'écran, et on verrait un éclair blanc
-// entre les deux. On le garde jusqu'au premier rendu (voir plus bas).
+// L'écran natif ne se retire pas tout seul : c'est nous qui décidons quand,
+// une fois qu'il y a vraiment quelque chose à montrer (voir plus bas).
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function resolveProposals(ids: string[]): Proposal[] {
@@ -79,10 +77,6 @@ function AppInner() {
   } = useThemeSettings();
 
   const [screen, setScreen] = useState<Screen>('booting');
-  // L'animation du logo se joue PAR-DESSUS l'app, qui se monte derrière : la
-  // session est relue et l'écran de destination préparé pendant ces trois
-  // secondes et demie, au lieu de les attendre.
-  const [introDone, setIntroDone] = useState(false);
   const [howItWorksReturnTo, setHowItWorksReturnTo] = useState<Screen>('intro');
   const [settingsReturnTo, setSettingsReturnTo] = useState<Screen>('intro');
   const [themesReturnTo, setThemesReturnTo] = useState<Screen>('intro');
@@ -199,14 +193,25 @@ function AppInner() {
 
   useEffect(() => {
     loadSession().then((session) => {
-      if (lienTraite.current) return;
+      // LA SESSION EST TOUJOURS REMISE EN PLACE ; SEULE LA DESTINATION CÈDE.
+      //
+      // Une première version abandonnait toute la restauration dès qu'un lien
+      // de duel avait été reçu. C'était l'inverse de ce qu'il faut : arriver
+      // par le QR code de quelqu'un ouvre précisément l'écran qui a besoin de
+      // TON classement pour le comparer au sien. L'app s'ouvrait donc sur une
+      // comparaison vide, en annonçant qu'on n'avait pas encore de résultat,
+      // alors que la partie était terminée et enregistrée.
+      const aller = (ecran: Screen) => {
+        if (!lienTraite.current) setScreen(ecran);
+      };
+
       if (!session) {
-        setScreen('intro');
+        aller('intro');
         return;
       }
       const proposals = resolveProposals(session.proposalIds);
       if (proposals.length === 0) {
-        setScreen('intro');
+        aller('intro');
         return;
       }
 
@@ -241,20 +246,34 @@ function AppInner() {
       // révélation : ce moment appartient à la fois où le paquet s'est
       // terminé, pas à chaque ouverture de l'app.
       setResultsRevealed(isComplete);
-      // Une dernière fois : la lecture de la session a pu prendre plus
-      // longtemps que celle du lien.
-      if (!lienTraite.current) setScreen(isComplete ? 'results' : 'swipe');
+      aller(isComplete ? 'results' : 'swipe');
     });
 
     hasSeenTutorial().then((seen) => setShowTutorial(!seen));
   }, []);
 
-  // Retrait de l'écran natif dès que React a peint quelque chose. Le violet
-  // de l'animation est celui de l'écran natif, à un point près sur un canal :
-  // la bascule est invisible.
+  // Retrait de l'écran natif quand il y a QUELQUE CHOSE À MONTRER, et pas
+  // avant.
+  //
+  // Le retirer dès le premier rendu de React découvrait l'écran d'attente
+  // `booting`, qui ne peint que le fond : on voyait le logo, puis une page
+  // vide, puis l'app. Ici il tient jusqu'à ce que la session ait été relue et
+  // l'écran de destination choisi, si bien que le logo cède la place
+  // directement aux cartes ou à l'accueil.
+  //
+  // Le minuteur n'est pas une précaution de principe. Si la lecture de la
+  // session n'aboutissait jamais, l'app resterait indéfiniment sur son logo,
+  // sans rien pour en sortir ni le moindre message pour l'expliquer : c'est la
+  // panne la plus déroutante pour qui la subit, et la moins chère à rendre
+  // impossible.
   useEffect(() => {
-    SplashScreen.hideAsync().catch(() => {});
-  }, []);
+    if (screen !== 'booting') {
+      SplashScreen.hideAsync().catch(() => {});
+      return;
+    }
+    const filet = setTimeout(() => SplashScreen.hideAsync().catch(() => {}), 3000);
+    return () => clearTimeout(filet);
+  }, [screen]);
 
   // Une session démarrée pendant cette exécution de l'app reste "reprenable"
   // tant qu'elle n'a pas été explicitement effacée. Sans ce calcul, revenir à
@@ -536,9 +555,6 @@ function AppInner() {
             </ScreenTransition>
           )}
         </ErrorBoundary>
-
-        {/* En dernier, donc au-dessus de tout le reste. */}
-        {!introDone && <IntroAnimation onDone={() => setIntroDone(true)} />}
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

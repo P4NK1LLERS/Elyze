@@ -23,7 +23,7 @@ import {
 import { ColorTokens, fonts, radii, spacing } from '../theme';
 import { useColors } from '../theme/ThemeContext';
 
-// Signaler un bogue, proposer une idée, donner un avis.
+// Signaler un bug, proposer une idée, donner un avis.
 //
 // LE POINT DÉLICAT EST LA PROMESSE, PAS LE FORMULAIRE. L'app affirme partout
 // qu'elle n'envoie rien ; une boîte intitulée « envoyer » y contredit tout,

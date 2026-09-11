@@ -34,7 +34,7 @@ describe('brouillon de retour', () => {
   it('vise bien l’adresse annoncée et porte la nature dans l’objet', () => {
     const url = buildFeedbackMailto('bug', 'la carte reste blanche');
     expect(url.startsWith(`mailto:${FEEDBACK_EMAIL}?`)).toBe(true);
-    expect(decodeURIComponent(url)).toContain('Bogue');
+    expect(decodeURIComponent(url)).toContain('Bug');
   });
 
   // Le défaut que ce test attrape : un corps non échappé. Un `&` dans le
