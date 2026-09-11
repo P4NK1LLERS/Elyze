@@ -21,19 +21,37 @@ import { APP_VERSION } from './appInfo';
 // l'aller-retour « quelle version ? » sur tout rapport de bug. Ni réponses,
 // ni résultat, ni identifiant : ils ne diraient rien d'utile sur un défaut
 // d'affichage, et l'app n'a de toute façon rien de tel à donner.
-export const FEEDBACK_EMAIL = 'vfalchun@gmail.com';
+export const FEEDBACK_EMAIL = 'elyze2027@ik.me';
 
 export type FeedbackKind = 'bug' | 'idee' | 'avis';
 
+// UN MODÈLE PAR NATURE DE RETOUR, ET UNE SECTION DE PLUS POUR LE BUG.
+//
+// Les trois retours n'appellent pas le même effort. Une idée ou un avis tient
+// dans un paragraphe, et un formulaire en plusieurs cases y serait une
+// paperasse qui décourage d'écrire. Un rapport de bug, lui, est presque
+// inutile sans la manière de le refaire : « la carte reste blanche » n'a
+// jamais permis de corriger quoi que ce soit, tandis que trois lignes de
+// marche à suivre transforment une énigme en correction d'un quart d'heure.
+//
+// D'où la seconde case, offerte au seul bug, et facultative : elle disparaît
+// du courriel si elle est laissée vide, plutôt que d'y laisser un intertitre
+// suivi de rien.
 export type FeedbackKindInfo = {
   kind: FeedbackKind;
   label: string;
   // Ce que l'objet du courriel annonce : trier une boîte de réception sans
   // ouvrir chaque message est le minimum qu'on doive à qui la relève.
   subject: string;
+  // Intitulé du champ principal. Il sert DEUX FOIS : au-dessus de la case
+  // dans l'app, et comme intertitre dans le courriel. Le message arrive donc
+  // sous le titre de la question à laquelle il répond.
+  champ: string;
   // Texte affiché en filigrane dans le champ de saisie. Il appelle le détail
   // utile à CE type de retour, plutôt qu'un « ton message » universel.
   placeholder: string;
+  // Seconde case, facultative, propre à certaines natures de retour.
+  complement?: { champ: string; placeholder: string };
 };
 
 export const FEEDBACK_KINDS: FeedbackKindInfo[] = [
@@ -41,19 +59,25 @@ export const FEEDBACK_KINDS: FeedbackKindInfo[] = [
     kind: 'bug',
     label: 'Un bug',
     subject: 'Bug',
-    placeholder:
-      'Ce qui s’est passé, et ce que tu faisais juste avant. Si tu peux le refaire à volonté, dis-le : c’est le renseignement le plus utile.',
+    champ: 'Ce qui s’est passé',
+    placeholder: 'Décris ce que tu as vu, et ce que tu attendais à la place.',
+    complement: {
+      champ: 'Comment le refaire',
+      placeholder: '1. j’ouvre l’app\n2. je vais sur…\n3. et là…',
+    },
   },
   {
     kind: 'idee',
     label: 'Une idée',
     subject: 'Idée',
+    champ: 'L’idée',
     placeholder: 'Ce qui te manque, ou ce que tu aimerais pouvoir faire.',
   },
   {
     kind: 'avis',
     label: 'Un avis',
     subject: 'Avis',
+    champ: 'Ton avis',
     placeholder: 'Ce qui t’a plu, ce qui t’a gêné, ce qui t’a paru douteux.',
   },
 ];
@@ -62,14 +86,29 @@ export const FEEDBACK_KINDS_BY_ID: Record<FeedbackKind, FeedbackKindInfo> = Obje
   FEEDBACK_KINDS.map((k) => [k.kind, k])
 ) as Record<FeedbackKind, FeedbackKindInfo>;
 
-// Longueur retenue du message.
+// Longueur retenue des deux cases.
 //
 // Ce n'est pas une limite éditoriale mais une limite technique : un `mailto:`
 // est une URL, et les systèmes la tronquent au-delà de quelques milliers de
 // caractères. Un message coupé au milieu d'une phrase, sans que rien ne
-// l'annonce, serait le pire des comportements — on borne donc franchement, et
-// le compteur le dit pendant la frappe.
-export const FEEDBACK_MAX = 1500;
+// l'annonce, serait le pire des comportements.
+//
+// CES DEUX NOMBRES SONT CALCULÉS À L'ENVERS, DEPUIS LE PIRE CAS. Ce qui
+// compte n'est pas la longueur du texte mais celle de l'URL une fois
+// échappée, et l'échappement n'a pas un coût fixe : un « é » devient `%C3%A9`
+// et un retour à la ligne `%0A`, si bien qu'un texte fait uniquement de
+// lettres accentuées et de retours à la ligne pèse quatre fois et demie son
+// poids. Une première version tenait 1500 et 600 caractères, ce qui donnait
+// 9718 caractères d'URL dans ce cas extrême, au-delà du budget qu'on se
+// fixe. Les valeurs ci-dessous le ramènent sous 8000, mesuré par un test.
+//
+// Le prix payé est nul en pratique : 1200 caractères font environ deux cents
+// mots, et la marche à suivre a désormais sa propre case.
+export const FEEDBACK_MAX = 1200;
+
+// La seconde case est plus courte : une marche à suivre tient en quelques
+// lignes numérotées.
+export const FEEDBACK_MAX_COMPLEMENT = 400;
 
 // Contexte technique, en clair et lisible par la personne qui l'envoie.
 //
@@ -85,12 +124,36 @@ export function feedbackContext(): string {
 
 // Le brouillon complet, prêt à être confié à l'application de messagerie.
 //
+// LA MISE EN FORME EST CELLE D'UN COURRIEL, PAS CELLE D'UN FORMULAIRE.
+// Intertitres en capitales, sections séparées par une ligne vide, et le bloc
+// technique renvoyé en pied sous un filet : ce qui compte se lit d'abord, ce
+// qui sert au diagnostic attend en bas. Rien n'est masqué pour autant, tout
+// reste relisible et modifiable dans le brouillon avant l'envoi.
+//
+// L'OBJET PORTE LA VERSION. Une boîte qui reçoit cinquante « Élyze · Bug »
+// ne se trie pas ; « Élyze 1.1.0 · Bug » se regroupe d'un coup d'œil, et dit
+// tout de suite si le défaut concerne encore la version en cours.
+//
 // `encodeURIComponent` est indispensable sur les deux champs : un retour à la
 // ligne, un `&` ou un accent non échappés coupent l'URL, et le message arrive
 // amputé sans qu'aucune erreur ne soit levée.
-export function buildFeedbackMailto(kind: FeedbackKind, message: string): string {
+const FILET = '-----';
+
+export function buildFeedbackMailto(
+  kind: FeedbackKind,
+  message: string,
+  complement = ''
+): string {
   const info = FEEDBACK_KINDS_BY_ID[kind];
-  const objet = `Élyze · ${info.subject}`;
-  const corps = `${message.trim()}\n\n---\n${feedbackContext()}`;
+  const objet = `Élyze ${APP_VERSION} · ${info.subject}`;
+
+  const blocs = [`${info.champ.toUpperCase()}\n${message.trim()}`];
+  // La section ne paraît que si elle a quelque chose à dire.
+  if (info.complement && complement.trim()) {
+    blocs.push(`${info.complement.champ.toUpperCase()}\n${complement.trim()}`);
+  }
+  blocs.push(`${FILET}\n${feedbackContext()}\nÉcrit depuis les réglages de l’application.`);
+
+  const corps = blocs.join('\n\n');
   return `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(objet)}&body=${encodeURIComponent(corps)}`;
 }

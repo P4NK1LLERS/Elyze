@@ -17,6 +17,7 @@ import {
   FEEDBACK_KINDS,
   FEEDBACK_KINDS_BY_ID,
   FEEDBACK_MAX,
+  FEEDBACK_MAX_COMPLEMENT,
   FeedbackKind,
   feedbackContext,
 } from '../data/feedback';
@@ -39,6 +40,7 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [kind, setKind] = useState<FeedbackKind>('bug');
   const [message, setMessage] = useState('');
+  const [complement, setComplement] = useState('');
 
   // Une boîte rouverte repart à vide. Retrouver le brouillon de la fois
   // précédente, déjà envoyé, inviterait à l'envoyer deux fois.
@@ -46,14 +48,16 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
     if (visible) {
       setKind('bug');
       setMessage('');
+      setComplement('');
     }
   }, [visible]);
 
+  const info = FEEDBACK_KINDS_BY_ID[kind];
   const pret = message.trim().length > 0;
 
   const envoyer = () => {
     if (!pret) return;
-    openUrl(buildFeedbackMailto(kind, message));
+    openUrl(buildFeedbackMailto(kind, message, complement));
     onClose();
   };
 
@@ -105,20 +109,47 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
                 })}
               </View>
 
+              {/* L'intitulé du champ est celui-là même qui servira
+                  d'intertitre dans le courriel : ce qu'on écrit ici arrive
+                  là-bas sous la question à laquelle on répond. */}
+              <Text style={styles.champTitre}>{info.champ}</Text>
               <TextInput
                 style={styles.input}
                 value={message}
                 onChangeText={setMessage}
-                placeholder={FEEDBACK_KINDS_BY_ID[kind].placeholder}
+                placeholder={info.placeholder}
                 placeholderTextColor={colors.textMuted}
                 multiline
                 textAlignVertical="top"
                 maxLength={FEEDBACK_MAX}
-                accessibilityLabel="Ton message"
+                accessibilityLabel={info.champ}
               />
               <Text style={styles.compteur}>
                 {message.length} / {FEEDBACK_MAX}
               </Text>
+
+              {/* Seconde case, réservée au bug : sans marche à suivre, un
+                  défaut se corrige rarement. Facultative, et absente du
+                  courriel si on la laisse vide. */}
+              {info.complement && (
+                <>
+                  <View style={styles.champEntete}>
+                    <Text style={styles.champTitre}>{info.complement.champ}</Text>
+                    <Text style={styles.facultatif}>facultatif</Text>
+                  </View>
+                  <TextInput
+                    style={[styles.input, styles.inputCourt]}
+                    value={complement}
+                    onChangeText={setComplement}
+                    placeholder={info.complement.placeholder}
+                    placeholderTextColor={colors.textMuted}
+                    multiline
+                    textAlignVertical="top"
+                    maxLength={FEEDBACK_MAX_COMPLEMENT}
+                    accessibilityLabel={`${info.complement.champ}, facultatif`}
+                  />
+                </>
+              )}
 
               <View style={styles.notice}>
                 <Ionicons name="lock-closed-outline" size={15} color={colors.textSecondary} />
@@ -234,6 +265,29 @@ function makeStyles(colors: ColorTokens) {
     kindTextActive: {
       color: colors.onAccent,
     },
+    // Intitulé de case. Il porte le même mot que l'intertitre du courriel,
+    // pour qu'on sache en écrivant sous quel titre le texte arrivera.
+    champTitre: {
+      fontSize: fonts.tiny + 1,
+      fontWeight: '800',
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+      color: colors.textMuted,
+      marginTop: spacing.sm,
+      paddingHorizontal: spacing.xs,
+    },
+    champEntete: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    facultatif: {
+      fontSize: fonts.tiny,
+      fontWeight: '600',
+      color: colors.textMuted,
+      marginTop: spacing.sm,
+      paddingHorizontal: spacing.xs,
+    },
     input: {
       minHeight: 120,
       maxHeight: 200,
@@ -246,6 +300,15 @@ function makeStyles(colors: ColorTokens) {
       lineHeight: (fonts.small + 1) * 1.45,
       color: colors.textPrimary,
       marginTop: spacing.xs,
+    },
+    // La marche à suivre tient en quelques lignes : la case n'a pas à ouvrir
+    // aussi grand que celle du récit. Elle doit tout de même contenir son
+    // propre filigrane, qui fait trois lignes numérotées : à 84 px, il
+    // arrivait déjà avec une barre de défilement, ce qui donnait l'impression
+    // d'un champ trop petit avant même d'avoir écrit un mot.
+    inputCourt: {
+      minHeight: 104,
+      maxHeight: 150,
     },
     compteur: {
       alignSelf: 'flex-end',
