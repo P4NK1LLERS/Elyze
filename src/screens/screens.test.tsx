@@ -9,9 +9,7 @@ import { ThemeSelectScreen } from './ThemeSelectScreen';
 import { SettingsScreen } from './SettingsScreen';
 import { HowItWorksScreen } from './HowItWorksScreen';
 import { DuelScreen } from './DuelScreen';
-import { CANDIDATES } from '../data/candidates';
-import { computeResults } from '../utils/scoring';
-import { encoderDuel } from '../utils/duel';
+import { encoderDefi, paquetDuDefi } from '../utils/duel';
 import { ThemeProvider } from '../theme/ThemeContext';
 import { PROPOSALS } from '../data/proposals';
 import { THEMES, THEMES_BY_ID } from '../data/themes';
@@ -391,32 +389,66 @@ describe('le voile sur les candidats', () => {
 });
 
 describe('duel', () => {
-  // L'écran de duel rend un QR code entier, soit quelques centaines de vues
-  // imbriquées produites par un encodeur écrit à la main. C'est exactement le
-  // genre d'écran qui se monte en théorie et explose en pratique.
-  it('le duel affiche un code à montrer', () => {
-    const tree = mount(
-      <DuelScreen proposals={DECK} answers={ANSWERS} deckDone={false} codeRecu={null} onBack={noop} />
+  // Le paquet du duel est reproductible : l'écran refabrique son code à partir
+  // de la graine, les deux doivent donc concorder. L'écran rend en outre un QR
+  // code entier, soit quelques centaines de vues imbriquées produites par un
+  // encodeur écrit à la main : c'est exactement le genre d'écran qui se monte
+  // en théorie et explose en pratique.
+  const GRAINE = 7;
+  const TOUS = THEMES.map((t) => t.id);
+  const PAQUET = paquetDuDefi(GRAINE, TOUS);
+  const TOUTES: Answers = Object.fromEntries(
+    PAQUET.map((p, i) => [p.id, (['like', 'nope', 'superlike'] as const)[i % 3]])
+  );
+  const SIENNES: Answers = Object.fromEntries(
+    PAQUET.map((p, i) => [p.id, (['nope', 'like'] as const)[i % 2]])
+  );
+
+  function duel(props: Partial<React.ComponentProps<typeof DuelScreen>> = {}) {
+    return mount(
+      <DuelScreen
+        proposals={PAQUET}
+        answers={TOUTES}
+        graine={GRAINE}
+        themeIds={TOUS}
+        adversaire={undefined}
+        deckDone
+        codeRecu={null}
+        onAccepterDefi={noop}
+        onBack={noop}
+        {...props}
+      />
     );
-    const rendu = texts(tree).join(' ');
-    expect(rendu).toContain('Ton code');
-    expect(rendu).toContain('Le code de l’autre');
+  }
+
+  it('affiche un défi à montrer, et de quoi en ouvrir un autre', () => {
+    const rendu = texts(duel()).join(' ');
+    expect(rendu).toContain('Ton défi');
+    expect(rendu).toContain('Le défi de quelqu’un');
   });
 
-  it('le duel compare deux classements quand un code arrive par lien', () => {
-    // Le code de « l'autre » est fabriqué à partir de réponses différentes,
-    // pour que la comparaison ait quelque chose à montrer.
-    const autresReponses: Answers = Object.fromEntries(
-      DECK.slice(0, 20).map((p, i) => [p.id, (['nope', 'like'] as const)[i % 2]])
-    );
-    const code = encoderDuel(computeResults(autresReponses, DECK, CANDIDATES));
+  it('un défi reçu propose de le relever, sans rien dévoiler des réponses', () => {
+    const rendu = texts(duel({ codeRecu: encoderDefi(GRAINE, TOUS, SIENNES) })).join(' ');
+    expect(rendu).toContain('Un défi t’attend');
+    expect(rendu).toContain('Relever le défi');
+    // Rien du contenu du paquet ne doit paraître : ni les propositions, ni ce
+    // qu'il en a fait. On ne montre que la taille du défi.
+    for (const proposition of PAQUET.slice(0, 5)) {
+      expect(rendu).not.toContain(proposition.text);
+    }
+  });
 
-    const tree = mount(
-      <DuelScreen proposals={DECK} answers={ANSWERS} deckDone codeRecu={code} onBack={noop} />
-    );
-    const rendu = texts(tree).join(' ');
-    expect(rendu).toContain('points d’écart en moyenne');
-    // Le QR code de saisie a laissé la place à la comparaison.
-    expect(rendu).not.toContain('Le code de l’autre');
+  it('la comparaison montre les accords, carte par carte et sans candidat', () => {
+    const rendu = texts(duel({ adversaire: SIENNES })).join(' ');
+    expect(rendu).toContain('propositions où vous êtes du même avis');
+    expect(rendu).toContain('désaccord');
+    // La liste porte le texte des mesures, jamais leur auteur.
+    expect(rendu).toContain(PAQUET[0].text);
+  });
+
+  it('attend la fin du paquet avant de comparer', () => {
+    const rendu = texts(duel({ adversaire: SIENNES, deckDone: false })).join(' ');
+    expect(rendu).toContain('Défi en cours');
+    expect(rendu).not.toContain('propositions où vous êtes du même avis');
   });
 });

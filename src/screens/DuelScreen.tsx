@@ -12,97 +12,95 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { haptics } from '../utils/haptics';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { QrCode } from '../components/QrCode';
-import { Avatar } from '../components/Avatar';
-import { CANDIDATES } from '../data/candidates';
-import { computeResults } from '../utils/scoring';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { THEMES_BY_ID } from '../data/themes';
+import { haptics } from '../utils/haptics';
+import { QR_CAPACITE_MAX } from '../utils/qr';
 import {
   codeLignes,
   codeLisible,
-  comparerDuel,
-  decoderDuel,
-  DUEL_CODE_LENGTH,
+  comparerDefi,
+  decoderDefi,
+  Defi,
+  DUEL_LONGUEUR_MINIMALE,
   DuelComparaison,
-  DuelResultat,
   duelUrl,
-  encoderDuel,
+  encoderDefi,
+  LigneProposition,
   nettoyerCode,
+  Position,
 } from '../utils/duel';
 import { Answers, Proposal } from '../types';
 import { ColorTokens, fonts, radii, spacing } from '../theme';
-import { useColors } from '../theme/ThemeContext';
+import { useColors, useThemeColor } from '../theme/ThemeContext';
 
-// Hauteur réservée sous le contenu pendant la saisie, quand le système ne
-// dit pas celle du clavier. Un clavier de téléphone en portrait fait entre 260
-// et 340 points selon l'appareil et la langue ; on prend le haut de la
-// fourchette, le trop-plein ne se voyant que sous la forme d'un peu de vide
-// sous le dernier bloc.
+// Hauteur réservée sous le contenu pendant la saisie, quand le système ne dit
+// pas celle du clavier. Un clavier de téléphone en portrait fait entre 260 et
+// 340 points selon l'appareil et la langue ; on prend le haut de la fourchette,
+// le trop-plein ne se voyant que sous la forme d'un peu de vide sous le
+// dernier bloc.
 const RESERVE_CLAVIER = 340;
 
-// Le duel : mettre son classement à côté de celui de quelqu'un d'autre.
+// Le duel : jouer les mêmes cartes que quelqu'un d'autre, puis comparer.
 //
-// COMMENT L'ÉCHANGE SE FAIT, ET POURQUOI AINSI.
+// L'ÉCRAN A QUATRE ÉTATS, et un seul est visible à la fois :
 //
-// L'un montre son QR code, l'autre le photographie avec l'appareil photo
-// ORDINAIRE de son téléphone, qui propose alors d'ouvrir Élyze sur la
-// comparaison. L'app ne demande donc aucun accès à la caméra : elle n'ouvre
-// pas d'objectif, elle reçoit un lien. Pour une application qui affirme ne
-// rien collecter, réclamer la caméra pour lire un carré noir et blanc aurait
-// été cher payé — et une permission refusée aurait rendu la fonction
-// inutilisable, sans recours.
+//  1. un défi vient d'arriver et n'est pas encore relevé ;
+//  2. un défi est en cours, le paquet n'est pas fini ;
+//  3. le défi est fini : la comparaison ;
+//  4. aucun défi en cours : on montre le sien, ou on entre celui d'un autre.
 //
-// Le champ de saisie juste en dessous est ce recours, pour les appareils
-// photo qui ne savent pas ouvrir un lien, et pour un code reçu par message.
+// COMMENT L'ÉCHANGE SE FAIT. L'un montre son QR code, l'autre le photographie
+// avec l'appareil photo ORDINAIRE de son téléphone, qui propose alors d'ouvrir
+// Élyze sur le défi. L'app ne demande donc aucun accès à la caméra : elle
+// n'ouvre pas d'objectif, elle reçoit un lien. Pour une application qui affirme
+// ne rien collecter, réclamer la caméra pour lire un carré noir et blanc aurait
+// été cher payé, et une permission refusée aurait rendu la fonction
+// inutilisable sans recours. Le champ de saisie est ce recours.
 //
-// Rien ne transite par un serveur : le code EST la donnée. Tout ce qui
-// s'affiche ici a été lu dans les vingt-six caractères que l'autre a montrés.
+// Rien ne transite par un serveur : le code EST la donnée.
 export function DuelScreen({
   proposals,
   answers,
+  graine,
+  themeIds,
+  adversaire,
   deckDone,
   codeRecu,
+  onAccepterDefi,
   onBack,
 }: {
   proposals: Proposal[];
   answers: Answers;
+  graine: number;
+  themeIds: string[];
+  // Réponses de l'adversaire, si la partie en cours est un défi relevé.
+  adversaire: Answers | undefined;
   deckDone: boolean;
-  // Code arrivé par lien profond, le cas échéant : la comparaison s'ouvre
-  // alors directement.
+  // Code arrivé par lien profond, le cas échéant.
   codeRecu: string | null;
+  onAccepterDefi: (defi: Defi) => void;
   onBack: () => void;
 }) {
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
-  const mesResultats = useMemo(
-    () => computeResults(answers, proposals, CANDIDATES),
-    [answers, proposals]
-  );
   const monCode = useMemo(
-    () => (mesResultats.length > 0 ? encoderDuel(mesResultats) : null),
-    [mesResultats]
+    () => (proposals.length > 0 && deckDone ? encoderDefi(graine, themeIds, answers) : null),
+    [proposals.length, deckDone, graine, themeIds, answers]
   );
 
-  // La saisie est conservée NETTOYÉE, sans espaces ni minuscules : c'est elle
-  // qu'on décode, et la mise en forme n'est qu'un habillage à l'affichage.
   const [saisie, setSaisie] = useState('');
-  const defilement = useRef<ScrollView>(null);
-  const champ = useRef<TextInput>(null);
-  // Hauteur à réserver sous le contenu pendant la saisie. Zéro le reste du
-  // temps (voir RESERVE_CLAVIER et l'effet plus bas).
-  const [reserve, setReserve] = useState(0);
   const [erreur, setErreur] = useState<string | null>(null);
-  const [autre, setAutre] = useState<DuelResultat | null>(null);
-  // « Copié » remplace le libellé du bouton pendant deux secondes.
-  //
-  // Sans cet aveu, copier ne produit RIEN de perceptible : le presse-papier
-  // est invisible, et l'appui se lit comme un bouton mort. Android affiche
-  // parfois un message système, iOS jamais, et sur aucun des deux on ne peut
-  // compter.
+  const [defiRecu, setDefiRecu] = useState<Defi | null>(null);
+  const [confirmation, setConfirmation] = useState(false);
+  const defilement = useRef<ScrollView>(null);
+  const [reserve, setReserve] = useState(0);
   const [copie, setCopie] = useState(false);
   const minuteurCopie = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(
     () => () => {
       if (minuteurCopie.current) clearTimeout(minuteurCopie.current);
@@ -110,9 +108,29 @@ export function DuelScreen({
     []
   );
 
+  // POURQUOI RÉSERVER DE LA PLACE PLUTÔT QUE DE FAIRE DÉFILER.
+  //
+  // Depuis le SDK 54, le mode bord à bord est actif par défaut sur Android, et
+  // le système ne redimensionne plus la fenêtre à l'ouverture du clavier :
+  // l'application continue de dessiner sur toute la hauteur de l'écran et le
+  // clavier se pose par-dessus. Faire défiler jusqu'en bas ne dégageait donc
+  // rien, puisque ce bas était derrière le clavier. Il faut AJOUTER de la
+  // hauteur sous le contenu pour que le champ ait où remonter.
+  useEffect(() => {
+    const montre = Keyboard.addListener('keyboardDidShow', (evenement) => {
+      setReserve(Math.max(evenement.endCoordinates?.height ?? 0, RESERVE_CLAVIER));
+      setTimeout(() => defilement.current?.scrollToEnd({ animated: true }), 60);
+    });
+    const cache = Keyboard.addListener('keyboardDidHide', () => setReserve(0));
+    return () => {
+      montre.remove();
+      cache.remove();
+    };
+  }, []);
+
   const lire = useMemo(
     () => (code: string) => {
-      const lu = decoderDuel(code);
+      const lu = decoderDefi(code);
       if (lu === 'illisible') {
         setErreur('Ce code n’est pas lisible. Vérifie qu’il est recopié en entier.');
         return;
@@ -125,91 +143,38 @@ export function DuelScreen({
       }
       if (lu === 'catalogue') {
         setErreur(
-          'Vos deux applications ne contiennent pas les mêmes propositions. Les pourcentages ne porteraient pas sur les mêmes mesures.'
+          'Vos deux applications ne contiennent pas les mêmes propositions. Le paquet ne pourrait pas être refait à l’identique.'
         );
         return;
       }
       setErreur(null);
-      setAutre(lu);
+      setDefiRecu(lu);
     },
     []
   );
 
-  // Un code reçu par lien profond ouvre la comparaison sans rien demander :
-  // la personne vient de scanner, elle n'a pas à appuyer sur un bouton de
-  // plus pour voir ce qu'elle est venue voir.
+  // Un code reçu par lien profond s'ouvre sans rien demander : la personne
+  // vient de scanner, elle n'a pas à appuyer sur un bouton de plus.
   useEffect(() => {
     if (codeRecu) lire(codeRecu);
   }, [codeRecu, lire]);
 
-  // Le compte y est : ni trop court, ni tronqué.
-  const complet = saisie.length === DUEL_CODE_LENGTH;
-
-  // POURQUOI RÉSERVER DE LA PLACE PLUTÔT QUE DE FAIRE DÉFILER.
-  //
-  // Le champ est le dernier bloc de l'écran, et une première correction se
-  // contentait donc de faire défiler jusqu'en bas à la prise de focus. Sur un
-  // téléphone, le champ restait sous le clavier — et la raison est instructive.
-  //
-  // Depuis le SDK 54, le mode bord à bord est actif par défaut sur Android
-  // (`edgeToEdgeEnabled`, que la version 16 rendra obligatoire). Dans ce mode
-  // le système NE REDIMENSIONNE PLUS la fenêtre à l'ouverture du clavier :
-  // l'application continue de dessiner sur toute la hauteur de l'écran, et le
-  // clavier se pose par-dessus. Le défilement atteignait donc bien le bas du
-  // contenu ; simplement, ce bas était derrière le clavier. Faire défiler plus
-  // n'y aurait rien changé, puisqu'il n'y avait plus rien à découvrir.
-  //
-  // Il faut donc AJOUTER de la hauteur sous le contenu, pour que le champ ait
-  // où remonter. C'est ce que fait ce rembourrage, et le défilement redevient
-  // alors efficace.
-  //
-  // On le dimensionne sur la hauteur réelle du clavier quand le système la
-  // donne, avec un plancher pour le cas où il ne la donnerait pas : une
-  // réserve un peu trop grande ne coûte qu'un peu de vide sous le champ,
-  // là où une réserve absente ramène le défaut d'origine.
-  useEffect(() => {
-    const montre = Keyboard.addListener('keyboardDidShow', (evenement) => {
-      setReserve(Math.max(evenement.endCoordinates?.height ?? 0, RESERVE_CLAVIER));
-      // Le défilement vient APRÈS le rembourrage : l'inverse ferait défiler
-      // vers un bas d'écran qui n'a pas encore grandi.
-      setTimeout(() => defilement.current?.scrollToEnd({ animated: true }), 60);
-    });
-    const cache = Keyboard.addListener('keyboardDidHide', () => setReserve(0));
-    return () => {
-      montre.remove();
-      cache.remove();
-    };
-  }, []);
-
-  // Le clavier peut déjà être ouvert quand on touche le champ (on revient d'un
-  // autre champ, ou il n'a jamais été refermé) : « keyboardDidShow » ne se
-  // déclenche alors pas, et il faut redemander le défilement soi-même.
-  const remonterLeChamp = () => {
-    setTimeout(() => defilement.current?.scrollToEnd({ animated: true }), 250);
-  };
-
   const comparaison = useMemo<DuelComparaison | null>(
-    () => (autre ? comparerDuel(mesResultats, autre) : null),
-    [autre, mesResultats]
+    () => (adversaire && deckDone ? comparerDefi(proposals, answers, adversaire) : null),
+    [adversaire, deckDone, proposals, answers]
   );
 
   const partager = () => {
     if (!monCode) return;
     Share.share({
-      message: `Compare ton classement Élyze au mien : ${duelUrl(monCode)}\n\nOu entre ce code dans l’app : ${codeLisible(monCode)}`,
+      message: `Je te défie sur Élyze : ${duelUrl(monCode)}\n\nOu entre ce code dans l’app : ${codeLisible(monCode)}`,
     }).catch(() => {});
   };
 
-  // COPIER NE MET QUE LE CODE, sans la phrase qui l'accompagne dans le
-  // partage. Les deux gestes ne servent pas la même chose : on partage vers
-  // quelqu'un qui découvre l'app et a besoin du lien et d'une explication, on
-  // copie pour recoller le code soi-même quelque part, dans une conversation
-  // déjà en cours ou dans le champ de l'autre téléphone. Y joindre un message
-  // obligerait alors à faire le ménage après collage.
-  //
-  // C'est la forme AFFICHÉE qui est copiée, groupes de quatre compris : ce
-  // qu'on lit à l'écran est ce qu'on obtient, et la lecture du code ignore de
-  // toute façon les espaces.
+  // COPIER NE MET QUE LE CODE, sans la phrase qui l'accompagne dans le partage.
+  // Les deux gestes ne servent pas la même chose : on partage vers quelqu'un
+  // qui découvre l'app et a besoin du lien et d'une explication, on copie pour
+  // recoller le code soi-même dans une conversation déjà en cours.
   const copier = () => {
     if (!monCode) return;
     Clipboard.setStringAsync(codeLisible(monCode)).catch(() => {});
@@ -219,31 +184,9 @@ export function DuelScreen({
     minuteurCopie.current = setTimeout(() => setCopie(false), 2000);
   };
 
-  if (comparaison && autre) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <ScreenHeader
-          title="Duel"
-          onBack={() => {
-            setAutre(null);
-            setSaisie('');
-          }}
-        />
-        <Comparaison
-          comparaison={comparaison}
-          autre={autre}
-          deckDone={deckDone}
-          styles={styles}
-          colors={colors}
-        />
-      </SafeAreaView>
-    );
-  }
-
-  return (
+  const cadre = (contenu: React.ReactNode) => (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <ScreenHeader title="Duel" onBack={onBack} />
-
       <ScrollView
         ref={defilement}
         contentContainerStyle={[styles.content, { paddingBottom: spacing.xxl + reserve }]}
@@ -251,154 +194,248 @@ export function DuelScreen({
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.lead}>
-          Montre ton code à quelqu’un qui a fait le test, ou entre le sien : vous verrez vos
-          deux classements côte à côte, candidat par candidat.
-        </Text>
+        {contenu}
+      </ScrollView>
+    </SafeAreaView>
+  );
 
-        {monCode ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Ton code</Text>
-            <Text style={styles.cardHint}>
-              Fais-le photographier avec l’appareil photo ordinaire de l’autre téléphone. Élyze
-              s’ouvrira directement sur la comparaison.
-            </Text>
+  // --- 1. Un défi attend d'être relevé -------------------------------------
+  if (defiRecu) {
+    const partieEnCours = proposals.length > 0 && !deckDone;
+    return (
+      <>
+        {cadre(
+          <>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Un défi t’attend</Text>
+              <Text style={styles.cardHint}>
+                Quelqu’un a joué {defiRecu.paquet.length} proposition
+                {defiRecu.paquet.length > 1 ? 's' : ''} et te met au défi de répondre aux
+                mêmes. Vous verrez ensuite, carte par carte, ce que chacun a validé.
+              </Text>
 
-            <View style={styles.qrWrap}>
-              <QrCode value={duelUrl(monCode)} size={240} />
-            </View>
-
-            <View style={styles.codeBloc}>
-              {codeLignes(monCode).map((ligne) => (
-                <Text key={ligne} style={styles.code} selectable>
-                  {ligne}
-                </Text>
-              ))}
-            </View>
-
-            <View style={styles.rangeeBoutons}>
-              <Pressable
-                onPress={copier}
-                style={({ pressed }) => [styles.secondaire, styles.moitie, pressed && styles.presse]}
-                accessibilityRole="button"
-                accessibilityLabel={copie ? 'Code copié' : 'Copier le code seul'}
-              >
-                <Ionicons
-                  name={copie ? 'checkmark' : 'copy-outline'}
-                  size={17}
-                  color={colors.accentText}
+              <View style={styles.defiChiffres}>
+                <Chiffre
+                  styles={styles}
+                  valeur={String(defiRecu.paquet.length)}
+                  libelle={`carte${defiRecu.paquet.length > 1 ? 's' : ''} à trancher`}
                 />
-                <Text style={styles.secondaireTexte} numberOfLines={1}>
-                  {copie ? 'Copié' : 'Copier'}
-                </Text>
-              </Pressable>
+                <Chiffre
+                  styles={styles}
+                  valeur={String(defiRecu.themeIds.length)}
+                  libelle={`thème${defiRecu.themeIds.length > 1 ? 's' : ''}`}
+                />
+              </View>
+
               <Pressable
-                onPress={partager}
-                style={({ pressed }) => [styles.secondaire, styles.moitie, pressed && styles.presse]}
+                onPress={() => (partieEnCours ? setConfirmation(true) : onAccepterDefi(defiRecu))}
+                style={({ pressed }) => [styles.principal, pressed && styles.presse]}
                 accessibilityRole="button"
-                accessibilityLabel="Envoyer le code avec un message"
+                accessibilityLabel="Relever le défi"
               >
-                <Ionicons name="share-outline" size={17} color={colors.accentText} />
-                <Text style={styles.secondaireTexte} numberOfLines={1}>
-                  Envoyer
-                </Text>
+                <Text style={styles.principalTexte}>Relever le défi</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  setDefiRecu(null);
+                  setSaisie('');
+                }}
+                style={({ pressed }) => [styles.lien, pressed && styles.presse]}
+                accessibilityRole="button"
+                accessibilityLabel="Refuser ce défi"
+              >
+                <Text style={styles.lienTexte}>Pas maintenant</Text>
               </Pressable>
             </View>
 
-            {!deckDone && (
-              <View style={styles.avertissement}>
-                <Ionicons name="alert-circle-outline" size={16} color={colors.warningText} />
-                <Text style={styles.avertissementTexte}>
-                  Ton paquet n’est pas terminé : ce code porte un classement encore provisoire.
-                </Text>
-              </View>
-            )}
-          </View>
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Pas encore de code</Text>
-            <Text style={styles.cardHint}>
-              Réponds « j’adhère » ou « pas pour moi » à au moins une proposition : sans réponse
-              comptabilisée, il n’y a pas de classement à comparer.
+            <Text style={styles.note}>
+              Ses réponses sont déjà dans le code : rien ne sera demandé à personne, et rien ne
+              passe par un serveur. Tu ne verras les siennes qu’une fois les tiennes données.
             </Text>
-          </View>
+          </>
         )}
 
+        <ConfirmDialog
+          visible={confirmation}
+          title="Remplacer ta partie en cours ?"
+          message="Relever ce défi démarre une nouvelle partie sur les cartes de l’autre. Tes réponses en cours seront perdues."
+          confirmLabel="Relever"
+          onConfirm={() => {
+            setConfirmation(false);
+            onAccepterDefi(defiRecu);
+          }}
+          onCancel={() => setConfirmation(false)}
+        />
+      </>
+    );
+  }
+
+  // --- 2. Défi en cours, paquet pas terminé --------------------------------
+  if (adversaire && !deckDone) {
+    const repondues = Object.keys(answers).length;
+    return cadre(
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Défi en cours</Text>
+        <Text style={styles.cardHint}>
+          Tu as répondu à {repondues} des {proposals.length} cartes de ce défi. La comparaison
+          s’ouvrira quand tu auras tranché la dernière : montrer ses réponses avant les tiennes
+          influencerait ce que tu vas répondre.
+        </Text>
+        <Pressable
+          onPress={onBack}
+          style={({ pressed }) => [styles.principal, pressed && styles.presse]}
+          accessibilityRole="button"
+          accessibilityLabel="Retourner aux cartes"
+        >
+          <Text style={styles.principalTexte}>Continuer le défi</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // --- 3. La comparaison ----------------------------------------------------
+  if (comparaison) {
+    return cadre(<Comparaison comparaison={comparaison} styles={styles} colors={colors} />);
+  }
+
+  // --- 4. Montrer son code, ou entrer celui d'un autre ---------------------
+  const url = monCode ? duelUrl(monCode) : null;
+  // Un paquet très long donne un code qui ne tient plus dans un QR code
+  // lisible. Plutôt que d'en afficher un illisible, on n'en affiche pas, et
+  // on le dit : le code en clair, lui, n'a pas de limite.
+  const qrPossible = url !== null && url.length <= QR_CAPACITE_MAX;
+
+  return cadre(
+    <>
+      <Text style={styles.lead}>
+        Défie quelqu’un : il répondra exactement aux mêmes propositions que toi, et vous verrez
+        carte par carte ce que chacun a validé.
+      </Text>
+
+      {monCode ? (
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Le code de l’autre</Text>
+          <Text style={styles.cardTitle}>Ton défi</Text>
           <Text style={styles.cardHint}>
-            Si l’appareil photo ne veut rien savoir, recopie les caractères affichés sous son QR
-            code. Les majuscules et les espaces n’ont pas d’importance.
+            Fais-le photographier avec l’appareil photo ordinaire de l’autre téléphone. Élyze
+            s’ouvrira directement sur le défi.
           </Text>
 
-          {/* LE CODE SE MET EN FORME PENDANT LA FRAPPE, en groupes de quatre,
-              exactement comme il s'affiche sur l'écran de l'autre. C'est ce
-              qui permet de comparer les deux d'un coup d'œil et de repérer
-              une faute avant de valider, au lieu de découvrir après coup
-              qu'un caractère ne va pas. La casse et les espaces sont remis
-              d'office, et coller le lien entier marche aussi. */}
-          <TextInput
-            ref={champ}
-            style={styles.champ}
-            value={codeLisible(saisie)}
-            onChangeText={(texte) => {
-              setSaisie(nettoyerCode(texte));
-              setErreur(null);
-            }}
-            onFocus={remonterLeChamp}
-            placeholder="Par exemple 04A2 9K7M 1TPZ…"
-            placeholderTextColor={colors.textMuted}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            autoComplete="off"
-            // `done` plutôt que `next` : il n'y a rien après ce champ, et le
-            // bouton du clavier lance directement la comparaison.
-            returnKeyType="done"
-            onSubmitEditing={() => complet && lire(saisie)}
-            accessibilityLabel="Code de duel de l’autre personne"
-          />
-
-          <Text style={styles.compteur}>
-            {saisie.length} / {DUEL_CODE_LENGTH} caractères
-          </Text>
-
-          {erreur && (
-            <View style={styles.erreur}>
-              <Ionicons name="close-circle-outline" size={16} color={colors.dangerText} />
-              <Text style={styles.erreurTexte}>{erreur}</Text>
+          {qrPossible ? (
+            <View style={styles.qrWrap}>
+              <QrCode value={url} size={240} />
+            </View>
+          ) : (
+            <View style={styles.avertissement}>
+              <Ionicons name="alert-circle-outline" size={16} color={colors.warningText} />
+              <Text style={styles.avertissementTexte}>
+                Ton paquet est trop long pour tenir dans un QR code lisible. Envoie le code
+                ci-dessous, il fonctionne aussi bien.
+              </Text>
             </View>
           )}
 
-          {/* Le bouton n'attend pas qu'on ait fini pour dire qu'il manque
-              quelque chose : il reste éteint tant que le compte n'y est pas,
-              et le compteur juste au-dessus explique pourquoi. */}
-          <Pressable
-            onPress={() => lire(saisie)}
-            disabled={!complet}
-            style={({ pressed }) => [
-              styles.principal,
-              !complet && styles.principalEteint,
-              pressed && complet && styles.presse,
-            ]}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !complet }}
-            accessibilityLabel={
-              complet
-                ? 'Comparer avec ce code'
-                : `Comparer, il manque ${DUEL_CODE_LENGTH - saisie.length} caractères`
-            }
-          >
-            <Text style={styles.principalTexte}>Comparer</Text>
-          </Pressable>
-        </View>
+          <View style={styles.codeBloc}>
+            {codeLignes(monCode).map((ligne, i) => (
+              <Text key={i} style={styles.code} selectable>
+                {ligne}
+              </Text>
+            ))}
+          </View>
 
-        <Text style={styles.note}>
-          Le code ne contient que les onze pourcentages et le nombre de réponses. Ni tes
-          réponses proposition par proposition, ni ton nom. Rien ne passe par un serveur : tout
-          est dans les caractères que vous échangez.
+          <View style={styles.rangeeBoutons}>
+            <Pressable
+              onPress={copier}
+              style={({ pressed }) => [styles.secondaire, styles.moitie, pressed && styles.presse]}
+              accessibilityRole="button"
+              accessibilityLabel={copie ? 'Code copié' : 'Copier le code seul'}
+            >
+              <Ionicons
+                name={copie ? 'checkmark' : 'copy-outline'}
+                size={17}
+                color={colors.accentText}
+              />
+              <Text style={styles.secondaireTexte} numberOfLines={1}>
+                {copie ? 'Copié' : 'Copier'}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={partager}
+              style={({ pressed }) => [styles.secondaire, styles.moitie, pressed && styles.presse]}
+              accessibilityRole="button"
+              accessibilityLabel="Envoyer le défi avec un message"
+            >
+              <Ionicons name="share-outline" size={17} color={colors.accentText} />
+              <Text style={styles.secondaireTexte} numberOfLines={1}>
+                Envoyer
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Termine d’abord ton paquet</Text>
+          <Text style={styles.cardHint}>
+            Un défi transporte tes réponses à toutes les cartes : il ne peut donc s’envoyer
+            qu’une fois la dernière tranchée. Tu peux déjà relever celui de quelqu’un d’autre.
+          </Text>
+        </View>
+      )}
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Le défi de quelqu’un</Text>
+        <Text style={styles.cardHint}>
+          Si l’appareil photo ne veut rien savoir, recopie les caractères affichés sous son QR
+          code. Les majuscules et les espaces n’ont pas d’importance.
         </Text>
-      </ScrollView>
-    </SafeAreaView>
+
+        <TextInput
+          style={styles.champ}
+          value={codeLisible(saisie)}
+          onChangeText={(texte) => {
+            setSaisie(nettoyerCode(texte));
+            setErreur(null);
+          }}
+          onFocus={() => setTimeout(() => defilement.current?.scrollToEnd({ animated: true }), 250)}
+          placeholder="Colle ou recopie le code reçu"
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          autoComplete="off"
+          multiline
+          accessibilityLabel="Code de défi de l’autre personne"
+        />
+        <Text style={styles.compteur}>{saisie.length} caractères</Text>
+
+        {erreur && (
+          <View style={styles.erreur}>
+            <Ionicons name="close-circle-outline" size={16} color={colors.dangerText} />
+            <Text style={styles.erreurTexte}>{erreur}</Text>
+          </View>
+        )}
+
+        <Pressable
+          onPress={() => lire(saisie)}
+          disabled={saisie.length < DUEL_LONGUEUR_MINIMALE}
+          style={({ pressed }) => [
+            styles.principal,
+            saisie.length < DUEL_LONGUEUR_MINIMALE && styles.principalEteint,
+            pressed && saisie.length >= DUEL_LONGUEUR_MINIMALE && styles.presse,
+          ]}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: saisie.length < DUEL_LONGUEUR_MINIMALE }}
+          accessibilityLabel="Ouvrir ce défi"
+        >
+          <Text style={styles.principalTexte}>Ouvrir le défi</Text>
+        </Pressable>
+      </View>
+
+      <Text style={styles.note}>
+        Un code de défi contient les cartes tirées et tes réponses à chacune. C’est plus que ton
+        résultat : ne le montre qu’à des gens à qui tu confierais tes opinions. Rien ne passe par
+        un serveur, tout est dans les caractères que vous échangez.
+      </Text>
+    </>
   );
 }
 
@@ -406,45 +443,26 @@ export function DuelScreen({
 
 function Comparaison({
   comparaison,
-  autre,
-  deckDone,
   styles,
   colors,
 }: {
   comparaison: DuelComparaison;
-  autre: DuelResultat;
-  deckDone: boolean;
   styles: ReturnType<typeof makeStyles>;
   colors: ColorTokens;
 }) {
-  const { lignes, communs, ecartMoyen, mesPremiers, sesPremiers, memePremier } = comparaison;
-
-  if (communs === 0) {
-    return (
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Rien à comparer</Text>
-          <Text style={styles.cardHint}>
-            Vos deux parties n’ont aucun candidat en commun : vous avez sans doute joué sur des
-            thèmes différents, et vos paquets ne contenaient pas les mêmes personnes.
-          </Text>
-        </View>
-      </ScrollView>
-    );
-  }
+  const { lignes, tranchees, accords, mesPremiers, sesPremiers, memePremier } = comparaison;
+  const desaccords = tranchees - accords;
 
   return (
-    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      {/* L'ÉCART EST DONNÉ EN POINTS, PAS EN POURCENTAGE DE RESSEMBLANCE.
-          « Vous vous ressemblez à 87 % » aurait été plus flatteur et
-          entièrement inventé : ce nombre ne serait la mesure de rien. L'écart
-          moyen, lui, se lit directement sur les barres juste en dessous, et
-          chacun peut vérifier d'où il sort. */}
+    <>
       <View style={styles.resume}>
-        <Text style={styles.resumeChiffre}>{ecartMoyen}</Text>
+        <Text style={styles.resumeChiffre}>
+          {accords}
+          <Text style={styles.resumeSur}> / {tranchees}</Text>
+        </Text>
         <Text style={styles.resumeLibelle}>
-          points d’écart en moyenne, sur {communs} candidat{communs > 1 ? 's' : ''} comparé
-          {communs > 1 ? 's' : ''}
+          propositions où vous êtes du même avis, sur celles que vous avez tranchées tous les
+          deux
         </Text>
       </View>
 
@@ -452,36 +470,32 @@ function Comparaison({
         <Text style={styles.cardTitle}>
           {memePremier ? 'Vous avez le même premier' : 'Vos deux têtes de classement'}
         </Text>
+        <Text style={styles.cardHint}>
+          Vous avez répondu aux mêmes cartes : ces deux classements sont directement
+          comparables.
+        </Text>
         <View style={styles.tetes}>
-          <Tete titre="Toi" candidats={mesPremiers} styles={styles} />
-          {!memePremier && <Tete titre="L’autre" candidats={sesPremiers} styles={styles} />}
+          <Tete titre="Toi" candidats={mesPremiers.map((c) => c.name)} styles={styles} />
+          {!memePremier && (
+            <Tete titre="L’autre" candidats={sesPremiers.map((c) => c.name)} styles={styles} />
+          )}
         </View>
       </View>
 
+      {/* LA LISTE NE NOMME AUCUN CANDIDAT, et c'est délibéré. Ce qui intéresse
+          ici est ce que vous avez répondu, pas qui portait la mesure : la
+          proposition se juge sur son texte, exactement comme pendant le swipe.
+          Le thème, lui, reste affiché : il situe sans rien trahir. */}
       <View style={styles.legende}>
-        <View style={styles.legendeEntree}>
-          <View style={[styles.pastille, { backgroundColor: colors.accent }]} />
-          <Text style={styles.legendeTexte}>Toi</Text>
-        </View>
-        <View style={styles.legendeEntree}>
-          <View style={[styles.pastille, { backgroundColor: colors.neutralFill }]} />
-          <Text style={styles.legendeTexte}>L’autre</Text>
-        </View>
-        <Text style={styles.legendeNote}>Le plus gros désaccord en premier</Text>
+        <Text style={styles.legendeTexte}>
+          {desaccords} désaccord{desaccords > 1 ? 's' : ''} d’abord, puis vos accords
+        </Text>
       </View>
 
       {lignes.map((ligne) => (
-        <LigneDuel key={ligne.candidate.id} ligne={ligne} styles={styles} colors={colors} />
+        <LigneDuel key={ligne.proposal.id} ligne={ligne} styles={styles} colors={colors} />
       ))}
-
-      <Text style={styles.note}>
-        L’autre a répondu à {autre.reponses} proposition{autre.reponses > 1 ? 's' : ''} comptabilisée
-        {autre.reponses > 1 ? 's' : ''}.{' '}
-        {deckDone
-          ? 'Vos deux paquets sont tirés au hasard : vous n’avez pas répondu aux mêmes cartes, et c’est normal que les pourcentages diffèrent.'
-          : 'Ton propre classement est encore provisoire : il bougera d’ici la fin de ton paquet.'}
-      </Text>
-    </ScrollView>
+    </>
   );
 }
 
@@ -491,69 +505,85 @@ function Tete({
   styles,
 }: {
   titre: string;
-  candidats: { id: string; name: string }[];
+  candidats: string[];
   styles: ReturnType<typeof makeStyles>;
 }) {
   return (
     <View style={styles.tete}>
       <Text style={styles.teteTitre}>{titre}</Text>
-      <Text style={styles.teteNom}>
-        {candidats.length > 0 ? candidats.map((c) => c.name).join(', ') : 'aucun'}
-      </Text>
+      <Text style={styles.teteNom}>{candidats.length > 0 ? candidats.join(', ') : 'aucun'}</Text>
     </View>
   );
 }
+
+const MARQUES: Record<Position, { icone: keyof typeof Ionicons.glyphMap; mot: string }> = {
+  valide: { icone: 'checkmark-circle', mot: 'validé' },
+  rejete: { icone: 'close-circle', mot: 'rejeté' },
+  sansAvis: { icone: 'remove-circle-outline', mot: 'sans avis' },
+};
 
 function LigneDuel({
   ligne,
   styles,
   colors,
 }: {
-  ligne: DuelComparaison['lignes'][number];
+  ligne: LigneProposition;
   styles: ReturnType<typeof makeStyles>;
   colors: ColorTokens;
 }) {
-  const { candidate, mien, sien, ecart } = ligne;
+  const getThemeColor = useThemeColor();
+  const theme = THEMES_BY_ID[ligne.proposal.themeId];
+  const teinte = (p: Position) =>
+    p === 'valide' ? colors.successText : p === 'rejete' ? colors.dangerText : colors.textMuted;
 
   return (
-    <View style={styles.ligne}>
-      <Avatar candidate={candidate} size={34} />
-      <View style={styles.ligneCorps}>
-        <View style={styles.ligneEntete}>
-          <Text style={styles.ligneNom} numberOfLines={1}>
-            {candidate.name}
-          </Text>
-          {ecart !== null ? (
-            <Text style={styles.ligneEcart}>{ecart} pt{ecart > 1 ? 's' : ''}</Text>
-          ) : (
-            <Text style={styles.ligneAbsent}>non comparable</Text>
-          )}
-        </View>
+    <View style={[styles.ligne, ligne.desaccord && styles.ligneDesaccord]}>
+      <View style={styles.ligneEntete}>
+        {theme && (
+          <View style={styles.themePastille}>
+            <View style={[styles.themePoint, { backgroundColor: getThemeColor(theme.id) }]} />
+            <Text style={styles.themeNom} numberOfLines={1}>
+              {theme.label}
+            </Text>
+          </View>
+        )}
+        {ligne.desaccord && <Text style={styles.etiquetteDesaccord}>désaccord</Text>}
+        {ligne.accord && <Text style={styles.etiquetteAccord}>d’accord</Text>}
+      </View>
 
-        <Barre valeur={mien} couleur={colors.accent} styles={styles} />
-        <Barre valeur={sien} couleur={colors.neutralFill} styles={styles} />
+      <Text style={styles.ligneTexte}>{ligne.proposal.text}</Text>
+
+      <View style={styles.reponses}>
+        {(
+          [
+            ['Toi', ligne.mienne],
+            ['L’autre', ligne.sienne],
+          ] as [string, Position][]
+        ).map(([qui, p]) => (
+          <View key={qui} style={styles.reponse}>
+            <Ionicons name={MARQUES[p].icone} size={15} color={teinte(p)} />
+            <Text style={styles.reponseQui}>{qui}</Text>
+            <Text style={[styles.reponseMot, { color: teinte(p) }]}>{MARQUES[p].mot}</Text>
+          </View>
+        ))}
       </View>
     </View>
   );
 }
 
-function Barre({
-  valeur,
-  couleur,
+function Chiffre({
   styles,
+  valeur,
+  libelle,
 }: {
-  valeur: number | null;
-  couleur: string;
   styles: ReturnType<typeof makeStyles>;
+  valeur: string;
+  libelle: string;
 }) {
   return (
-    <View style={styles.barreRangee}>
-      <View style={styles.barrePiste}>
-        {valeur !== null && (
-          <View style={[styles.barreRemplissage, { width: `${valeur}%`, backgroundColor: couleur }]} />
-        )}
-      </View>
-      <Text style={styles.barreValeur}>{valeur !== null ? `${valeur} %` : '—'}</Text>
+    <View style={styles.chiffre}>
+      <Text style={styles.chiffreValeur}>{valeur}</Text>
+      <Text style={styles.chiffreLibelle}>{libelle}</Text>
     </View>
   );
 }
@@ -595,6 +625,32 @@ function makeStyles(colors: ColorTokens) {
       color: colors.textSecondary,
     },
 
+    defiChiffres: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+      marginVertical: spacing.xs,
+    },
+    chiffre: {
+      flex: 1,
+      alignItems: 'center',
+      backgroundColor: colors.accentSoft,
+      borderRadius: radii.md,
+      paddingVertical: spacing.md,
+      gap: 2,
+    },
+    chiffreValeur: {
+      fontSize: fonts.title,
+      fontWeight: '800',
+      color: colors.accentText,
+      fontVariant: ['tabular-nums'],
+    },
+    chiffreLibelle: {
+      fontSize: fonts.tiny,
+      fontWeight: '600',
+      color: colors.accentText,
+      textAlign: 'center',
+    },
+
     qrWrap: {
       alignItems: 'center',
       paddingVertical: spacing.sm,
@@ -604,33 +660,32 @@ function makeStyles(colors: ColorTokens) {
       gap: 2,
       paddingVertical: spacing.xs,
     },
-    // Le code en clair, en chasse fixe et bien espacé : il est fait pour être
-    // recopié caractère par caractère par quelqu'un qui regarde un écran.
+    // Le code en clair, bien espacé : il est fait pour être recopié caractère
+    // par caractère par quelqu'un qui regarde un écran.
     code: {
-      alignSelf: 'center',
-      fontSize: fonts.small + 1,
+      fontSize: fonts.small,
       fontWeight: '700',
-      letterSpacing: 1.5,
+      letterSpacing: 1.4,
       color: colors.textPrimary,
       fontVariant: ['tabular-nums'],
       textAlign: 'center',
     },
 
     champ: {
+      minHeight: 88,
+      maxHeight: 160,
       backgroundColor: colors.surfaceAlt,
       borderRadius: radii.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
       paddingVertical: spacing.md,
       paddingHorizontal: spacing.md,
-      fontSize: fonts.body,
+      fontSize: fonts.small + 1,
       fontWeight: '700',
-      letterSpacing: 1.2,
+      letterSpacing: 1.1,
       color: colors.textPrimary,
+      textAlignVertical: 'top',
     },
-
-    // Le décompte de la saisie. Il dit à la fois où l'on en est et pourquoi le
-    // bouton reste éteint, ce qui évite d'avoir à écrire la seconde chose.
     compteur: {
       alignSelf: 'flex-end',
       fontSize: fonts.tiny,
@@ -638,6 +693,7 @@ function makeStyles(colors: ColorTokens) {
       color: colors.textMuted,
       fontVariant: ['tabular-nums'],
     },
+
     principal: {
       alignItems: 'center',
       backgroundColor: colors.accent,
@@ -653,15 +709,14 @@ function makeStyles(colors: ColorTokens) {
       fontWeight: '700',
       color: colors.onAccent,
     },
-    rangeeBoutons: {
-      flexDirection: 'row',
-      gap: spacing.sm,
+    lien: {
+      alignItems: 'center',
+      paddingVertical: spacing.sm,
     },
-    // Les deux actions se valent : même poids visuel, même largeur. Donner le
-    // plein d'accent à l'une des deux dirait qu'elle est la bonne, alors que
-    // le choix dépend seulement de ce qu'on fait ensuite du code.
-    moitie: {
-      flex: 1,
+    lienTexte: {
+      fontSize: fonts.small,
+      fontWeight: '700',
+      color: colors.textSecondary,
     },
     secondaire: {
       flexDirection: 'row',
@@ -676,6 +731,13 @@ function makeStyles(colors: ColorTokens) {
       fontSize: fonts.small + 1,
       fontWeight: '700',
       color: colors.accentText,
+    },
+    rangeeBoutons: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+    },
+    moitie: {
+      flex: 1,
     },
     presse: {
       opacity: 0.7,
@@ -711,7 +773,6 @@ function makeStyles(colors: ColorTokens) {
       fontWeight: '600',
       color: colors.textPrimary,
     },
-
     note: {
       fontSize: fonts.tiny,
       lineHeight: fonts.tiny * 1.5,
@@ -734,6 +795,10 @@ function makeStyles(colors: ColorTokens) {
       color: colors.accentText,
       fontVariant: ['tabular-nums'],
     },
+    resumeSur: {
+      fontSize: fonts.title,
+      fontWeight: '700',
+    },
     resumeLibelle: {
       fontSize: fonts.small,
       fontWeight: '600',
@@ -743,6 +808,7 @@ function makeStyles(colors: ColorTokens) {
 
     tetes: {
       gap: spacing.sm,
+      marginTop: spacing.xs,
     },
     tete: {
       gap: 1,
@@ -761,95 +827,84 @@ function makeStyles(colors: ColorTokens) {
     },
 
     legende: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: spacing.md,
       paddingHorizontal: spacing.xs,
-    },
-    legendeEntree: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 5,
-    },
-    pastille: {
-      width: 10,
-      height: 10,
-      borderRadius: radii.pill,
     },
     legendeTexte: {
       fontSize: fonts.tiny,
       fontWeight: '700',
-      color: colors.textSecondary,
-    },
-    legendeNote: {
-      flex: 1,
-      textAlign: 'right',
-      fontSize: fonts.tiny,
       color: colors.textMuted,
     },
 
     ligne: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.sm + 2,
       backgroundColor: colors.surface,
       borderRadius: radii.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
-      paddingVertical: spacing.sm + 2,
-      paddingHorizontal: spacing.md,
+      padding: spacing.md,
+      gap: spacing.xs,
     },
-    ligneCorps: {
-      flex: 1,
-      gap: 3,
+    // Un liseré, pas un fond : le désaccord se repère au coup d'œil sans que
+    // la carte change de nature.
+    ligneDesaccord: {
+      borderColor: colors.danger,
     },
     ligneEntete: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.sm,
     },
-    ligneNom: {
+    themePastille: {
       flex: 1,
-      fontSize: fonts.small,
-      fontWeight: '700',
-      color: colors.textPrimary,
-    },
-    ligneEcart: {
-      fontSize: fonts.tiny,
-      fontWeight: '800',
-      color: colors.textSecondary,
-      fontVariant: ['tabular-nums'],
-    },
-    ligneAbsent: {
-      fontSize: fonts.tiny,
-      fontWeight: '600',
-      color: colors.textMuted,
-    },
-
-    barreRangee: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: spacing.sm,
+      gap: 5,
     },
-    barrePiste: {
+    themePoint: {
+      width: 8,
+      height: 8,
+      borderRadius: radii.pill,
+    },
+    themeNom: {
       flex: 1,
-      height: 7,
-      borderRadius: radii.pill,
-      backgroundColor: colors.neutralTrack,
-      overflow: 'hidden',
+      fontSize: fonts.tiny,
+      fontWeight: '700',
+      color: colors.textMuted,
     },
-    barreRemplissage: {
-      height: '100%',
-      borderRadius: radii.pill,
+    etiquetteDesaccord: {
+      fontSize: fonts.tiny,
+      fontWeight: '800',
+      color: colors.dangerText,
     },
-    barreValeur: {
-      width: 42,
-      textAlign: 'right',
+    etiquetteAccord: {
+      fontSize: fonts.tiny,
+      fontWeight: '800',
+      color: colors.successText,
+    },
+    ligneTexte: {
+      fontSize: fonts.small,
+      lineHeight: fonts.small * 1.4,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    reponses: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.md,
+      marginTop: 2,
+    },
+    reponse: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+    },
+    reponseQui: {
       fontSize: fonts.tiny,
       fontWeight: '700',
       color: colors.textSecondary,
-      fontVariant: ['tabular-nums'],
+    },
+    reponseMot: {
+      fontSize: fonts.tiny,
+      fontWeight: '700',
     },
   });
 }

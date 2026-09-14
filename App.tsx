@@ -20,8 +20,10 @@ import { PROPOSALS, PROPOSALS_BY_ID } from './src/data/proposals';
 import { CANDIDATES } from './src/data/candidates';
 import { THEMES, THEMES_BY_ID } from './src/data/themes';
 import { buildSessionDeck } from './src/utils/deck';
+import { graineAleatoire, shuffleAvecGraine } from './src/utils/shuffle';
+import { codeDepuisUrl, Defi } from './src/utils/duel';
 import { computeResults, pickTopMatch, topMatches } from './src/utils/scoring';
-import { codeDepuisUrl } from './src/utils/duel';
+
 import {
   clearSession,
   hasSeenTutorial,
@@ -84,6 +86,11 @@ function AppInner() {
   const [sessionProposals, setSessionProposals] = useState<Proposal[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Answers>({});
+  // Graine du mélange de la partie en cours. Conservée pour pouvoir refabriquer
+  // son code de défi à tout moment (voir utils/duel.ts).
+  const [graine, setGraine] = useState(0);
+  // Réponses de l'adversaire, quand cette partie est un défi relevé.
+  const [adversaire, setAdversaire] = useState<Answers | undefined>(undefined);
 
   // Résumé de la session enregistrée au lancement de l'app. Dès qu'une session
   // est en cours en mémoire, c'est elle qui fait foi (voir `restorable`).
@@ -240,6 +247,8 @@ function AppInner() {
       // Même remise en état que « Reprendre », jouée d'office.
       setSelectedThemeIds(session.selectedThemeIds);
       setSessionProposals(proposals);
+      setGraine(session.graine);
+      setAdversaire(session.adversaire);
       setCurrentIndex(session.currentIndex);
       setAnswers(session.answers);
       // Un paquet déjà terminé rouvre sur son résultat, et sans rejouer la
@@ -304,13 +313,17 @@ function AppInner() {
     currentIndexToSave: number,
     answersToSave: Answers,
     proposalsToSave: Proposal[],
-    themeIds: string[]
+    themeIds: string[],
+    graineASauver: number = graine,
+    adversaireASauver: Answers | undefined = adversaire
   ) => {
     saveSession({
       selectedThemeIds: themeIds,
       proposalIds: proposalsToSave.map((p) => p.id),
       currentIndex: currentIndexToSave,
       answers: answersToSave,
+      graine: graineASauver,
+      adversaire: adversaireASauver,
     });
   };
 
@@ -330,17 +343,46 @@ function AppInner() {
     // Sur une sélection de thèmes, il prend tout ce qu'ils contiennent : le
     // quota y ramenait la partie au candidat le moins prolixe, et on obtenait
     // onze cartes pour un thème qui en compte trente. Voir utils/deck.ts.
+    // LA GRAINE EST TIRÉE ICI, ET ELLE SUFFIT À REFAIRE LE PAQUET.
+    // C'est ce qui permet le duel : au lieu de transmettre cent soixante-cinq
+    // identifiants, le code de défi transporte cette graine et la liste des
+    // thèmes, et l'autre téléphone reconstruit exactement le même paquet.
+    const nouvelleGraine = graineAleatoire();
     const filtered = PROPOSALS.filter((p) => themeIds.includes(p.themeId));
-    const order = buildSessionDeck(filtered, themeIds.length === ALL_THEME_IDS.length);
+    const order = buildSessionDeck(
+      filtered,
+      themeIds.length === ALL_THEME_IDS.length,
+      shuffleAvecGraine(nouvelleGraine)
+    );
     setSelectedThemeIds(themeIds);
     setSessionProposals(order);
+    setGraine(nouvelleGraine);
+    setAdversaire(undefined);
     setCurrentIndex(0);
     setAnswers({});
     setStoredRestorable(null);
     setPendingRestore(null);
     setResultsRevealed(false);
     setScreen('swipe');
-    persist(0, {}, order, themeIds);
+    persist(0, {}, order, themeIds, nouvelleGraine, undefined);
+  };
+
+  // Relever un défi : on rejoue EXACTEMENT le paquet de l'autre, et l'on garde
+  // ses réponses de côté pour la comparaison finale. C'est une nouvelle partie,
+  // elle remplace donc celle en cours — l'écran de duel le demande avant.
+  const accepterDefi = (defi: Defi) => {
+    setSelectedThemeIds(defi.themeIds);
+    setSessionProposals(defi.paquet);
+    setGraine(defi.graine);
+    setAdversaire(defi.reponses);
+    setCurrentIndex(0);
+    setAnswers({});
+    setStoredRestorable(null);
+    setPendingRestore(null);
+    setResultsRevealed(false);
+    setDuelCode(null);
+    setScreen('swipe');
+    persist(0, {}, defi.paquet, defi.themeIds, defi.graine, defi.reponses);
   };
 
   const handleStartFresh = () => startSession(ALL_THEME_IDS);
@@ -365,6 +407,8 @@ function AppInner() {
     const proposals = resolveProposals(pendingRestore.proposalIds);
     setSelectedThemeIds(pendingRestore.selectedThemeIds);
     setSessionProposals(proposals);
+    setGraine(pendingRestore.graine);
+    setAdversaire(pendingRestore.adversaire);
     setCurrentIndex(pendingRestore.currentIndex);
     setAnswers(pendingRestore.answers);
     setScreen(pendingRestore.currentIndex >= proposals.length ? 'results' : 'swipe');
@@ -409,6 +453,8 @@ function AppInner() {
     setStoredRestorable(null);
     setPendingRestore(null);
     setSessionProposals([]);
+    setGraine(0);
+    setAdversaire(undefined);
     setCurrentIndex(0);
     setAnswers({});
     setResultsRevealed(false);
@@ -430,6 +476,8 @@ function AppInner() {
     setPendingRestore(null);
     setSelectedThemeIds(ALL_THEME_IDS);
     setSessionProposals([]);
+    setGraine(0);
+    setAdversaire(undefined);
     setCurrentIndex(0);
     setAnswers({});
     setResultsRevealed(false);
@@ -552,10 +600,14 @@ function AppInner() {
               <DuelScreen
                 proposals={sessionProposals}
                 answers={answers}
+                graine={graine}
+                themeIds={selectedThemeIds}
+                adversaire={adversaire}
                 deckDone={
                   sessionProposals.length > 0 && currentIndex >= sessionProposals.length
                 }
                 codeRecu={duelCode}
+                onAccepterDefi={accepterDefi}
                 onBack={quitterDuel}
               />
             </ScreenTransition>

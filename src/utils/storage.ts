@@ -37,6 +37,13 @@ export type StoredSession = {
   answers: Answers;
   // Empreinte du catalogue au moment de l'enregistrement (voir utils/catalog).
   catalog: string;
+  // Graine du mélange qui a produit ce paquet. Elle est conservée pour une
+  // seule raison : pouvoir REFABRIQUER le code de défi de cette partie, à tout
+  // moment, sans avoir à transmettre la liste des cartes (voir utils/duel.ts).
+  graine: number;
+  // Réponses de l'adversaire, quand cette partie est un défi relevé. Absentes
+  // d'une partie ordinaire.
+  adversaire?: Answers;
 };
 
 const ANSWER_VALUES = ['like', 'superlike', 'nope', 'skip'];
@@ -67,9 +74,19 @@ function isValidSession(value: unknown): value is StoredSession {
   if (!isStringArray(s.proposalIds)) return false;
   if (typeof s.currentIndex !== 'number' || !Number.isInteger(s.currentIndex)) return false;
   if (s.currentIndex < 0 || s.currentIndex > s.proposalIds.length) return false;
-  if (typeof s.answers !== 'object' || s.answers === null || Array.isArray(s.answers)) return false;
+  if (typeof s.graine !== 'number' || !Number.isFinite(s.graine)) return false;
+  if (!estDesReponses(s.answers)) return false;
+  // L'adversaire est facultatif, mais s'il est là il doit être lisible : une
+  // partie de défi dont les réponses adverses seraient abîmées vaut mieux
+  // rejouée que comparée à des données au hasard.
+  if (s.adversaire !== undefined && !estDesReponses(s.adversaire)) return false;
 
-  return Object.values(s.answers as Record<string, unknown>).every(
+  return true;
+}
+
+function estDesReponses(value: unknown): value is Answers {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every(
     (a) => typeof a === 'string' && ANSWER_VALUES.includes(a)
   );
 }

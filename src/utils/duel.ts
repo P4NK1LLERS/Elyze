@@ -1,56 +1,64 @@
-import { CANDIDATES, CANDIDATES_BY_ID } from '../data/candidates';
-import { Candidate, CandidateResult } from '../types';
+import { CANDIDATES } from '../data/candidates';
+import { PROPOSALS } from '../data/proposals';
+import { THEMES } from '../data/themes';
+import { Answers, AnswerValue, Candidate, CandidateResult, Proposal } from '../types';
 import { CATALOG_FINGERPRINT } from './catalog';
+import { buildSessionDeck } from './deck';
+import { computeResults } from './scoring';
+import { shuffleAvecGraine } from './shuffle';
 
-// Le duel : comparer son classement à celui de quelqu'un d'autre.
+// Le duel : jouer LES MÊMES CARTES que quelqu'un d'autre, puis comparer.
 //
-// TOUT TIENT DANS SEIZE OCTETS, et ce n'est pas une coquetterie. Le code doit
-// voyager dans un QR code qu'un téléphone lit à cinquante centimètres, dans une
-// lumière quelconque, tenu à la main. Plus la charge est courte, plus la
-// grille est grossière, et plus elle se lit vite et de loin. Seize octets
-// tiennent en version 3, soit 29 modules de côté : gros carrés, lecture
-// immédiate.
+// CE QUI A CHANGÉ, ET POURQUOI. La première version échangeait onze
+// pourcentages. C'était compact, et à peu près sans intérêt : chacun avait
+// tiré son propre paquet, si bien que les deux pourcentages ne portaient pas
+// sur les mêmes mesures. « 82 % contre 74 % » comparait deux questionnaires
+// différents, et l'écart mesurait pour moitié le hasard du tirage.
 //
-// CE QUI EST DANS LE CODE, ET CE QUI N'Y EST PAS.
+// Le code transporte donc maintenant un DÉFI : de quoi reconstruire le paquet
+// à l'identique, et les réponses de celui qui l'envoie. L'autre joue ces
+// cartes-là, et la comparaison porte enfin sur quelque chose.
 //
-// Y sont : onze pourcentages, un décompte de réponses, l'empreinte du
-// catalogue, un numéro de format et une somme de contrôle. Le résultat, donc,
-// et rien de plus.
+// LE PAQUET N'EST PAS TRANSMIS, IL EST RECONSTRUIT. Envoyer la liste des
+// propositions demanderait cent soixante-cinq identifiants, soit plusieurs
+// milliers de caractères. Une graine et la liste des thèmes en tiennent six
+// octets, et le mélange reproductible refait le même paquet de l'autre côté
+// (voir utils/shuffle.ts). Encore faut-il que les deux catalogues soient
+// identiques : l'empreinte en tête du code le vérifie avant toute chose.
 //
-// N'y sont PAS : les réponses proposition par proposition. Elles auraient
-// permis une comparaison bien plus fine — carte par carte, « vous n'êtes pas
-// d'accord sur ces trois-là » — mais c'est précisément ce qu'on ne veut pas
-// faire circuler. Un classement est un avis que l'on choisit de montrer ; la
-// liste de ses réponses à cent soixante-cinq mesures politiques est un profil
-// d'opinion, qui se recopie, se conserve et se recoupe. Un QR code est fait
-// pour être photographié par des inconnus. On s'en tient donc à ce qui est
-// déjà affiché à l'écran de résultat.
-//
-// AUCUN NOM N'Y FIGURE NON PLUS, et pas seulement par économie de place : un
-// prénom dans le code ferait du duel un échange nominatif, avec ce que cela
-// suppose de données personnelles à protéger. L'écran demande donc simplement
-// « qui est-ce ? » à l'arrivée, et la réponse reste sur le téléphone.
+// CE QUE LE CODE CONTIENT DÉSORMAIS, ET CE QUE CELA IMPLIQUE. Il porte les
+// réponses proposition par proposition, ce qui est un profil d'opinion et non
+// plus un simple résultat. C'est le prix de la comparaison demandée, et il est
+// payé en connaissance de cause : l'écran de duel le dit en toutes lettres
+// avant qu'on montre son code à qui que ce soit.
 
 // --- Format binaire ---------------------------------------------------------
 //
 //   octet 0      : version du format
 //   octets 1-2   : empreinte courte du catalogue
-//   octet 3      : nombre de réponses comptabilisées, borné à 255
-//   octets 4-14  : un pourcentage par candidat, dans l'ordre de CANDIDATES
-//   octet 15     : somme de contrôle
-export const DUEL_FORMAT = 1;
+//   octets 3-6   : graine du mélange
+//   octets 7-8   : masque des thèmes retenus, un bit par thème
+//   octets 9...  : deux bits par proposition du paquet reconstruit
+//   dernier      : somme de contrôle
+//
+// La longueur totale dépend du paquet, que seule la reconstruction révèle : on
+// lit l'entête, on refait le paquet, et c'est lui qui dit combien d'octets de
+// réponses doivent suivre.
+export const DUEL_FORMAT = 2;
 
-// Marque un candidat absent du classement de l'autre : ses propositions n'ont
-// pas été tirées (partie par thèmes), ou toutes laissées « sans avis ». 255
-// est hors de portée d'un pourcentage, donc sans ambiguïté.
-const ABSENT = 255;
+const ENTETE = 9;
 
-const TAILLE = 4 + CANDIDATES.length + 1;
+// Deux bits par réponse. « Sans avis » et « pas encore répondu » partagent la
+// valeur 0 : ni l'un ni l'autre ne compte dans le score, et un défi ne s'émet
+// de toute façon qu'une fois le paquet terminé.
+const CODES: Record<number, AnswerValue | undefined> = {
+  0: undefined,
+  1: 'nope',
+  2: 'like',
+  3: 'superlike',
+};
+const VALEURS: Record<AnswerValue, number> = { skip: 0, nope: 1, like: 2, superlike: 3 };
 
-// Empreinte du catalogue réduite à seize bits. Elle ne sert qu'à refuser une
-// comparaison entre deux versions de l'app dont les propositions diffèrent :
-// les pourcentages ne porteraient plus sur les mêmes mesures, et l'écart
-// affiché mesurerait la mise à jour, pas le désaccord.
 function empreinteCourte(): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < CATALOG_FINGERPRINT.length; i++) {
@@ -60,10 +68,33 @@ function empreinteCourte(): number {
   return h & 0xffff;
 }
 
-function sommeDeControle(octets: Uint8Array): number {
+function sommeDeControle(octets: Uint8Array, jusqua: number): number {
   let h = 0;
-  for (let i = 0; i < TAILLE - 1; i++) h = (h * 31 + octets[i]) & 0xff;
+  for (let i = 0; i < jusqua; i++) h = (h * 31 + octets[i]) & 0xff;
   return h;
+}
+
+// --- Thèmes, en un masque de bits ------------------------------------------
+//
+// L'ordre de THEMES fait foi des deux côtés : c'est un fichier généré, dont
+// l'ordre ne dépend d'aucune préférence locale. Un thème ajouté au catalogue
+// changerait l'empreinte, donc le code serait refusé avant d'en arriver là.
+function masqueDesThemes(themeIds: string[]): number {
+  let masque = 0;
+  THEMES.forEach((theme, i) => {
+    if (themeIds.includes(theme.id)) masque |= 1 << i;
+  });
+  return masque;
+}
+
+function themesDuMasque(masque: number): string[] {
+  return THEMES.filter((_, i) => (masque & (1 << i)) !== 0).map((t) => t.id);
+}
+
+// Reconstruit le paquet exact d'une partie à partir de sa clé.
+export function paquetDuDefi(graine: number, themeIds: string[]): Proposal[] {
+  const pool = PROPOSALS.filter((p) => themeIds.includes(p.themeId));
+  return buildSessionDeck(pool, themeIds.length === THEMES.length, shuffleAvecGraine(graine));
 }
 
 // --- Base 32 lisible à voix haute ------------------------------------------
@@ -87,7 +118,6 @@ function versBase32(octets: Uint8Array): string {
       bits -= 5;
     }
   }
-  // Les bits restants forment un dernier caractère, complété par des zéros.
   if (bits > 0) sortie += ALPHABET[(accumulateur << (5 - bits)) & 31];
   return sortie;
 }
@@ -97,9 +127,6 @@ function depuisBase32(texte: string): Uint8Array | null {
   let bits = 0;
   const sortie: number[] = [];
   for (const caractere of texte.toUpperCase()) {
-    // Les séparateurs de confort (espaces, tirets) sont ignorés : on veut
-    // qu'un code recopié depuis un écran, groupé par paquets de quatre, se
-    // colle tel quel.
     if (caractere === ' ' || caractere === '-') continue;
     const valeur = ALPHABET.indexOf(caractere);
     if (valeur < 0) return null;
@@ -113,71 +140,87 @@ function depuisBase32(texte: string): Uint8Array | null {
   return new Uint8Array(sortie);
 }
 
-// --- Encodage et décodage ---------------------------------------------------
+// --- Encodage ---------------------------------------------------------------
 
-export type DuelResultat = {
-  // Empreinte du catalogue de celui qui a produit le code.
-  catalogue: number;
-  reponses: number;
-  // Pourcentage par identifiant de candidat. Un candidat absent du classement
-  // de l'autre n'y figure pas.
-  pourcentages: Record<string, number>;
-};
-
-export function encoderDuel(resultats: CandidateResult[]): string {
-  const parId = new Map(resultats.map((r) => [r.candidate.id, r]));
-  const octets = new Uint8Array(TAILLE);
+export function encoderDefi(graine: number, themeIds: string[], reponses: Answers): string {
+  const paquet = paquetDuDefi(graine, themeIds);
+  const taille = ENTETE + Math.ceil((paquet.length * 2) / 8) + 1;
+  const octets = new Uint8Array(taille);
   const empreinte = empreinteCourte();
-  const reponses = resultats.reduce((somme, r) => somme + r.answered, 0);
+  const masque = masqueDesThemes(themeIds);
 
   octets[0] = DUEL_FORMAT;
   octets[1] = (empreinte >> 8) & 0xff;
   octets[2] = empreinte & 0xff;
-  octets[3] = Math.min(255, reponses);
-  CANDIDATES.forEach((candidat, i) => {
-    const trouve = parId.get(candidat.id);
-    octets[4 + i] = trouve ? Math.max(0, Math.min(100, trouve.pct)) : ABSENT;
-  });
-  octets[TAILLE - 1] = sommeDeControle(octets);
+  octets[3] = (graine >>> 24) & 0xff;
+  octets[4] = (graine >>> 16) & 0xff;
+  octets[5] = (graine >>> 8) & 0xff;
+  octets[6] = graine & 0xff;
+  octets[7] = (masque >> 8) & 0xff;
+  octets[8] = masque & 0xff;
 
+  paquet.forEach((proposition, i) => {
+    const reponse = reponses[proposition.id];
+    const valeur = reponse ? VALEURS[reponse] : 0;
+    // Deux bits par proposition, quatre par octet, du poids fort au faible.
+    octets[ENTETE + (i >> 2)] |= valeur << (6 - (i % 4) * 2);
+  });
+
+  octets[taille - 1] = sommeDeControle(octets, taille - 1);
   return versBase32(octets);
 }
 
+// --- Décodage ---------------------------------------------------------------
+
 export type DuelErreur = 'illisible' | 'format' | 'catalogue';
 
-export function decoderDuel(code: string): DuelResultat | DuelErreur {
+export type Defi = {
+  graine: number;
+  themeIds: string[];
+  // Le paquet reconstruit, dans l'ordre exact où l'autre l'a joué.
+  paquet: Proposal[];
+  // Ses réponses, indexées par identifiant de proposition.
+  reponses: Answers;
+};
+
+export function decoderDefi(code: string): Defi | DuelErreur {
   const octets = depuisBase32(code.trim());
-  if (!octets || octets.length !== TAILLE) return 'illisible';
-  if (octets[TAILLE - 1] !== sommeDeControle(octets)) return 'illisible';
+  if (!octets || octets.length < ENTETE + 2) return 'illisible';
   // Le numéro de format se lit AVANT le reste : un code produit par une
   // version ultérieure n'a pas la même disposition d'octets, et le lire comme
-  // s'il avait celle-ci donnerait des pourcentages plausibles mais faux.
+  // s'il avait celle-ci donnerait des réponses plausibles mais fausses.
   if (octets[0] !== DUEL_FORMAT) return 'format';
   if (((octets[1] << 8) | octets[2]) !== empreinteCourte()) return 'catalogue';
 
-  const pourcentages: Record<string, number> = {};
-  CANDIDATES.forEach((candidat, i) => {
-    const valeur = octets[4 + i];
-    if (valeur <= 100) pourcentages[candidat.id] = valeur;
+  const graine = ((octets[3] << 24) | (octets[4] << 16) | (octets[5] << 8) | octets[6]) >>> 0;
+  const themeIds = themesDuMasque((octets[7] << 8) | octets[8]);
+  if (themeIds.length === 0) return 'illisible';
+
+  const paquet = paquetDuDefi(graine, themeIds);
+  if (paquet.length === 0) return 'illisible';
+
+  // C'est la reconstruction qui dit la longueur attendue : un code plus court
+  // ou plus long ne décrit pas ce paquet-là.
+  const taille = ENTETE + Math.ceil((paquet.length * 2) / 8) + 1;
+  if (octets.length !== taille) return 'illisible';
+  if (octets[taille - 1] !== sommeDeControle(octets, taille - 1)) return 'illisible';
+
+  const reponses: Answers = {};
+  paquet.forEach((proposition, i) => {
+    const valeur = (octets[ENTETE + (i >> 2)] >> (6 - (i % 4) * 2)) & 3;
+    const reponse = CODES[valeur];
+    if (reponse) reponses[proposition.id] = reponse;
   });
 
-  return {
-    catalogue: (octets[1] << 8) | octets[2],
-    reponses: octets[3],
-    pourcentages,
-  };
+  return { graine, themeIds, paquet, reponses };
 }
 
 // --- Lien profond -----------------------------------------------------------
 //
 // Le QR code porte une URL et non le code nu : photographié par l'appareil
 // photo ordinaire du téléphone, il propose alors d'ouvrir Élyze directement
-// sur la comparaison. Avec le code nu, il aurait fallu le sélectionner, le
-// copier, ouvrir l'app, trouver où le coller.
-//
-// `elyze://` est déclaré dans app.json. Quand l'app n'est pas installée, rien
-// ne s'ouvre : c'est acceptable, un duel suppose deux joueurs équipés, et
-// l'écran affiche le code en clair juste en dessous pour tous les autres cas.
+// sur le défi. Avec le code nu, il aurait fallu le sélectionner, le copier,
+// ouvrir l'app, trouver où le coller.
 const DUEL_SCHEME = 'elyze';
 
 export function duelUrl(code: string): string {
@@ -194,9 +237,10 @@ export function codeDepuisUrl(url: string): string | null {
   return code.length > 0 ? code : null;
 }
 
-// Longueur d'un code, en caractères. Cinq bits par caractère, d'où l'arrondi
-// supérieur. C'est ce nombre qui dit à la saisie quand elle est complète.
-export const DUEL_CODE_LENGTH = Math.ceil((TAILLE * 8) / 5);
+// Longueur du plus court code possible : l'entête, un octet de réponses, un de
+// contrôle. Sert au champ de saisie pour ne pas proposer de comparer avant
+// qu'il y ait quelque chose à lire.
+export const DUEL_LONGUEUR_MINIMALE = Math.ceil(((ENTETE + 2) * 8) / 5);
 
 // Nettoie ce qui a été tapé ou collé, pour n'en garder qu'un code.
 //
@@ -214,7 +258,6 @@ export function nettoyerCode(saisie: string): string {
   const brut = codeDepuisUrl(saisie) ?? saisie;
   let sortie = '';
   for (const caractere of brut.toUpperCase()) {
-    if (sortie.length >= DUEL_CODE_LENGTH) break;
     if (ALPHABET.includes(caractere)) sortie += caractere;
   }
   return sortie;
@@ -225,95 +268,97 @@ export function codeLisible(code: string): string {
   return (code.match(/.{1,4}/g) ?? []).join(' ');
 }
 
-// Le même code, réparti sur DEUX LIGNES ÉQUILIBRÉES.
+// Le même code, réparti sur des lignes d'égale longueur.
 //
-// Vingt-six caractères font sept groupes, dont le dernier n'en compte que
-// deux. Laissé au retour à la ligne automatique, il se retrouvait seul sur sa
-// propre ligne, sous six groupes serrés : on lisait « WM » orphelin sous le
-// QR code, et plus rien n'avait l'air d'être un code. La coupe est donc
-// décidée ici, au milieu des groupes, jamais à l'intérieur de l'un d'eux.
-export function codeLignes(code: string): [string, string] {
+// Le dernier groupe compte rarement quatre caractères, et laissé au retour à
+// la ligne automatique il se retrouvait seul sous les autres : on lisait deux
+// lettres orphelines sous le QR code, et plus rien n'avait l'air d'être un
+// code. La coupe est donc décidée ici, entre les groupes, jamais à l'intérieur
+// de l'un d'eux.
+export function codeLignes(code: string, groupesParLigne = 4): string[] {
   const groupes = code.match(/.{1,4}/g) ?? [];
-  const coupe = Math.ceil(groupes.length / 2);
-  return [groupes.slice(0, coupe).join(' '), groupes.slice(coupe).join(' ')];
+  const lignes: string[] = [];
+  for (let i = 0; i < groupes.length; i += groupesParLigne) {
+    lignes.push(groupes.slice(i, i + groupesParLigne).join(' '));
+  }
+  return lignes;
 }
 
 // --- Comparaison ------------------------------------------------------------
 
-export type DuelLigne = {
-  candidate: Candidate;
-  mien: number | null;
-  sien: number | null;
-  // Écart en points, absent si l'un des deux manque.
-  ecart: number | null;
+// Ce qu'une réponse vaut dans la comparaison. « Validé » recouvre le
+// « j'adhère » et le « super like » : la nuance d'intensité appartient au
+// score, pas à la question de savoir si l'on est d'accord.
+export type Position = 'valide' | 'rejete' | 'sansAvis';
+
+export function position(reponse: AnswerValue | undefined): Position {
+  if (reponse === 'like' || reponse === 'superlike') return 'valide';
+  if (reponse === 'nope') return 'rejete';
+  return 'sansAvis';
+}
+
+export type LigneProposition = {
+  proposal: Proposal;
+  mienne: Position;
+  sienne: Position;
+  // Les deux ont tranché, et dans le même sens.
+  accord: boolean;
+  // Les deux ont tranché, en sens contraire.
+  desaccord: boolean;
 };
 
 export type DuelComparaison = {
-  lignes: DuelLigne[];
-  // Candidats classés des deux côtés : les seuls sur lesquels un écart a un
-  // sens.
-  communs: number;
-  // Écart moyen en points sur ces candidats. `null` s'il n'y en a aucun.
-  ecartMoyen: number | null;
-  // Les têtes de chaque classement. Plusieurs si égalité, comme partout
-  // ailleurs dans l'app : désigner un vainqueur unique serait inventer.
+  lignes: LigneProposition[];
+  // Propositions que les DEUX ont tranchées : les seules sur lesquelles
+  // « d'accord » ou « pas d'accord » veut dire quelque chose.
+  tranchees: number;
+  accords: number;
+  // Classements calculés sur le MÊME paquet, donc directement comparables.
+  mesResultats: CandidateResult[];
+  sesResultats: CandidateResult[];
   mesPremiers: Candidate[];
   sesPremiers: Candidate[];
   memePremier: boolean;
 };
 
-function premiers(pourcentages: Record<string, number>): Candidate[] {
-  const entrees = Object.entries(pourcentages);
-  if (entrees.length === 0) return [];
-  const sommet = Math.max(...entrees.map(([, v]) => v));
-  return entrees
-    .filter(([, v]) => v === sommet)
-    .map(([id]) => CANDIDATES_BY_ID[id])
-    .filter((c): c is Candidate => Boolean(c));
+function premiers(resultats: CandidateResult[]): Candidate[] {
+  return resultats.filter((r) => r.rank === 1).map((r) => r.candidate);
 }
 
-export function comparerDuel(
-  miens: CandidateResult[],
-  autre: DuelResultat
+export function comparerDefi(
+  paquet: Proposal[],
+  miennes: Answers,
+  siennes: Answers
 ): DuelComparaison {
-  const mesPourcentages: Record<string, number> = {};
-  for (const r of miens) mesPourcentages[r.candidate.id] = r.pct;
-
-  const lignes: DuelLigne[] = CANDIDATES.map((candidate) => {
-    const mien = mesPourcentages[candidate.id] ?? null;
-    const sien = autre.pourcentages[candidate.id] ?? null;
+  const lignes: LigneProposition[] = paquet.map((proposal) => {
+    const mienne = position(miennes[proposal.id]);
+    const sienne = position(siennes[proposal.id]);
+    const tranchee = mienne !== 'sansAvis' && sienne !== 'sansAvis';
     return {
-      candidate,
-      mien,
-      sien,
-      ecart: mien !== null && sien !== null ? Math.abs(mien - sien) : null,
+      proposal,
+      mienne,
+      sienne,
+      accord: tranchee && mienne === sienne,
+      desaccord: tranchee && mienne !== sienne,
     };
-  })
-    // Le plus gros désaccord en premier : c'est là qu'il y a quelque chose à
-    // se dire. Les candidats qu'un seul des deux a classés ferment la marche,
-    // faute de comparaison possible.
-    .sort((a, b) => {
-      if (a.ecart === null && b.ecart === null) {
-        return a.candidate.name.localeCompare(b.candidate.name, 'fr');
-      }
-      if (a.ecart === null) return 1;
-      if (b.ecart === null) return -1;
-      return b.ecart - a.ecart || a.candidate.name.localeCompare(b.candidate.name, 'fr');
-    });
+  });
 
-  const comparables = lignes.filter((l) => l.ecart !== null);
-  const mesPremiers = premiers(mesPourcentages);
-  const sesPremiers = premiers(autre.pourcentages);
+  // Les désaccords d'abord : c'est là qu'il y a quelque chose à se dire. Puis
+  // les accords, puis ce qu'un seul des deux a tranché.
+  const rang = (l: LigneProposition) => (l.desaccord ? 0 : l.accord ? 1 : 2);
+  lignes.sort((a, b) => rang(a) - rang(b));
+
+  const mesResultats = computeResults(miennes, paquet, CANDIDATES);
+  const sesResultats = computeResults(siennes, paquet, CANDIDATES);
+  const mesPremiers = premiers(mesResultats);
+  const sesPremiers = premiers(sesResultats);
 
   return {
     lignes,
-    communs: comparables.length,
-    ecartMoyen:
-      comparables.length > 0
-        ? Math.round(
-            comparables.reduce((somme, l) => somme + (l.ecart as number), 0) / comparables.length
-          )
-        : null,
+    tranchees: lignes.filter((l) => l.accord || l.desaccord).length,
+    accords: lignes.filter((l) => l.accord).length,
+    mesResultats,
+    sesResultats,
     mesPremiers,
     sesPremiers,
     // Vrai seulement si les DEUX ensembles de tête sont identiques : un

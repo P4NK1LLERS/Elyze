@@ -3,8 +3,8 @@ import renderer, { ReactTestRenderer } from 'react-test-renderer';
 import { Keyboard, ScrollView } from 'react-native';
 import { DuelScreen } from './DuelScreen';
 import { ThemeProvider } from '../theme/ThemeContext';
-import { PROPOSALS } from '../data/proposals';
-import { buildDeck, QUOTA_PAR_CANDIDAT } from '../utils/deck';
+import { THEMES } from '../data/themes';
+import { paquetDuDefi } from '../utils/duel';
 import { Answers } from '../types';
 
 // LE CLAVIER, QUI N'EXISTE NI DANS UN NAVIGATEUR NI DANS UNE CAPTURE.
@@ -20,7 +20,10 @@ import { Answers } from '../types';
 // HAUTEUR DISPONIBLE sous le dernier bloc. Sans elle, aucun défilement,
 // automatique ou à la main, ne peut dégager le champ.
 
-const DECK = buildDeck(PROPOSALS, QUOTA_PAR_CANDIDAT);
+// Un paquet reproductible : l'écran fabrique son code de défi à partir de la
+// graine, il faut donc que les deux correspondent.
+const GRAINE = 7;
+const DECK = paquetDuDefi(GRAINE, THEMES.map((t) => t.id));
 const REPONSES: Answers = Object.fromEntries(
   DECK.map((p, i) => [p.id, (['like', 'nope'] as const)[i % 2]])
 );
@@ -41,8 +44,12 @@ async function monter() {
         <DuelScreen
           proposals={DECK}
           answers={REPONSES}
+          graine={GRAINE}
+          themeIds={THEMES.map((t) => t.id)}
+          adversaire={undefined}
           deckDone
           codeRecu={null}
+          onAccepterDefi={() => {}}
           onBack={() => {}}
         />
       </ThemeProvider>

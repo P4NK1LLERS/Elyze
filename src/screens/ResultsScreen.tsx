@@ -366,7 +366,7 @@ export function ResultsScreen({
             <View style={styles.duelTexts}>
               <Text style={styles.duelTitle}>Défier quelqu’un</Text>
               <Text style={styles.duelHint}>
-                Montre ton QR code, et voyez vos deux classements côte à côte.
+                Il répondra aux mêmes cartes que toi, et vous verrez ce que chacun a validé.
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.accentText} />

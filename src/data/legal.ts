@@ -87,6 +87,11 @@ export const LEGAL_DOCUMENTS: Record<LegalTopic, LegalDocument> = {
           'Le bouton « Partager » fabrique une image sur ton téléphone, puis te laisse choisir dans quelle application l’envoyer. Tant que tu ne choisis pas, l’image ne quitte pas l’appareil.',
       },
       {
+        title: 'Le duel, et ce que ton code contient',
+        body:
+          'Défier quelqu’un fabrique un code qui voyage de téléphone à téléphone, par QR code ou par message, sans passer par aucun serveur. Ce code contient de quoi refaire le même paquet de cartes, et TES RÉPONSES À CHACUNE. C’est plus que ton résultat : c’est l’avis que tu as donné, proposition par proposition. Il ne part que si tu le montres ou l’envoies, et à qui tu décides. Ni ton nom ni rien d’autre ne s’y trouve.',
+      },
+      {
         title: 'Le retour que tu envoies',
         body:
           'Signaler un bug ou proposer une idée n’envoie rien depuis l’app : elle prépare un brouillon et l’ouvre dans ton application de messagerie. Tu le relis, tu le modifies, et tu l’envoies toi-même depuis ta propre adresse. Deux lignes techniques y sont ajoutées, affichées avant l’envoi : la version de l’app et le nom de ton système. Ni tes réponses, ni ton résultat, ni aucun identifiant.',

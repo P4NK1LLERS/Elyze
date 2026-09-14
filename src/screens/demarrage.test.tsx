@@ -7,9 +7,8 @@ import App from '../../App';
 import { PROPOSALS } from '../data/proposals';
 import { CATALOG_FINGERPRINT } from '../utils/catalog';
 import { buildDeck, QUOTA_PAR_CANDIDAT } from '../utils/deck';
-import { CANDIDATES } from '../data/candidates';
-import { computeResults } from '../utils/scoring';
-import { encoderDuel } from '../utils/duel';
+import { THEMES } from '../data/themes';
+import { encoderDefi, paquetDuDefi } from '../utils/duel';
 import { Answers } from '../types';
 
 // LE DÉMARRAGE, qui n'est observable ni à l'écran ni dans un test d'écran.
@@ -50,15 +49,16 @@ const SESSION_FINIE = JSON.stringify({
   currentIndex: DECK.length,
   answers: REPONSES,
   catalog: CATALOG_FINGERPRINT,
+  graine: 5,
 });
 
-// Le code d'un adversaire quelconque, fabriqué à partir d'autres réponses.
-const CODE_AUTRE = encoderDuel(
-  computeResults(
-    Object.fromEntries(DECK.map((p, i) => [p.id, i % 2 ? 'like' : 'nope'])) as Answers,
-    DECK,
-    CANDIDATES
-  )
+// Le défi d'un adversaire quelconque, sur un paquet reproductible.
+const GRAINE_DEFI = 99;
+const PAQUET_DEFI = paquetDuDefi(GRAINE_DEFI, THEMES.map((t) => t.id));
+const CODE_AUTRE = encoderDefi(
+  GRAINE_DEFI,
+  THEMES.map((t) => t.id),
+  Object.fromEntries(PAQUET_DEFI.map((p, i) => [p.id, i % 2 ? 'like' : 'nope'])) as Answers
 );
 
 const montes: ReactTestRenderer[] = [];
@@ -177,16 +177,15 @@ describe('démarrage de l’application', () => {
         retardLien,
       });
       const tree = await demarrer();
-      expect(textes(tree)).toContain('points d’écart en moyenne');
+      expect(textes(tree)).toContain('Un défi t’attend');
     });
 
-    // LE DÉFAUT QUI COMPTE : arriver par le QR code de quelqu'un ouvre
-    // justement l'écran qui a besoin de TON classement. Si la session n'est
-    // pas remise en place, la comparaison est vide et l'app prétend que tu
-    // n'as pas encore de résultat.
+    // LE DÉFAUT QUI COMPTE : arriver par le QR code de quelqu'un ne doit pas
+    // effacer la partie en cours. Relever le défi la remplacera, mais
+    // seulement après confirmation, et il faut donc qu'elle soit encore là.
     // Le lien arrive EN PREMIER : c'est le seul ordre où la restauration de
     // la session risque d'être abandonnée.
-    it('compare avec la session enregistrée, sans l’avoir perdue', async () => {
+    it('garde la session enregistrée sous le défi reçu', async () => {
       preparer({
         session: SESSION_FINIE,
         lien: `elyze://d?c=${CODE_AUTRE}`,
@@ -195,12 +194,10 @@ describe('démarrage de l’application', () => {
       });
       const tree = await demarrer();
       const vu = textes(tree);
-      expect(vu).toContain('Vos deux têtes de classement');
-      expect(vu).toContain('Le plus gros désaccord en premier');
-      // Les onze candidats de la session enregistrée sont bien comparés.
-      for (const candidat of CANDIDATES) expect(vu).toContain(candidat.name);
-      expect(vu).not.toContain('Pas encore de code');
-      expect(vu).not.toContain('Rien à comparer');
+      expect(vu).toContain('Un défi t’attend');
+      // La partie en cours est intacte : relever le défi demandera confirmation
+      // avant de la remplacer, ce qui suppose qu'elle existe encore.
+      expect(vu).toContain('Relever le défi');
     });
 
     it('ignore un lien qui ne porte pas de code', async () => {

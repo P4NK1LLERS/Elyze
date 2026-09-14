@@ -18,6 +18,7 @@ const SESSION_VALIDE = {
   currentIndex: 1,
   answers: { a: 'like' },
   catalog: CATALOG_FINGERPRINT,
+  graine: 1234,
 };
 
 beforeEach(() => {
@@ -38,6 +39,7 @@ describe('session enregistrée', () => {
       proposalIds: ['a'],
       currentIndex: 0,
       answers: {},
+      graine: 42,
     });
     const [, brut] = store.setItem.mock.calls[0];
     expect(JSON.parse(brut).catalog).toBe(CATALOG_FINGERPRINT);
@@ -99,5 +101,30 @@ describe('empreinte du catalogue', () => {
 
   it('annonce le nombre de propositions embarquées', () => {
     expect(CATALOG_FINGERPRINT.startsWith(`${PROPOSALS.length}-`)).toBe(true);
+  });
+});
+
+// La graine et les réponses de l'adversaire sont arrivées avec le duel. Une
+// session sans graine ne peut plus refabriquer son code de défi ; une session
+// dont les réponses adverses seraient abîmées produirait une comparaison
+// inventée. Les deux sont donc contrôlées comme le reste.
+describe('session de duel', () => {
+  it('refuse une session sans graine', async () => {
+    const { graine: _, ...sansGraine } = SESSION_VALIDE;
+    store.getItem.mockResolvedValue(JSON.stringify(sansGraine));
+    await expect(loadSession()).resolves.toBeNull();
+  });
+
+  it('accepte des réponses d’adversaire bien formées', async () => {
+    const duel = { ...SESSION_VALIDE, adversaire: { a: 'nope' } };
+    store.getItem.mockResolvedValue(JSON.stringify(duel));
+    await expect(loadSession()).resolves.toEqual(duel);
+  });
+
+  it('refuse des réponses d’adversaire abîmées', async () => {
+    store.getItem.mockResolvedValue(
+      JSON.stringify({ ...SESSION_VALIDE, adversaire: { a: 'peut-être' } })
+    );
+    await expect(loadSession()).resolves.toBeNull();
   });
 });

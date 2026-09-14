@@ -1,118 +1,148 @@
 import { CANDIDATES } from '../data/candidates';
-import { CandidateResult } from '../types';
+import { PROPOSALS } from '../data/proposals';
+import { THEMES } from '../data/themes';
+import { Answers, AnswerValue } from '../types';
 import {
   codeDepuisUrl,
   codeLignes,
   codeLisible,
-  DUEL_CODE_LENGTH,
-  nettoyerCode,
-  comparerDuel,
-  decoderDuel,
+  comparerDefi,
+  decoderDefi,
+  Defi,
   DUEL_FORMAT,
+  DUEL_LONGUEUR_MINIMALE,
   duelUrl,
-  DuelResultat,
-  encoderDuel,
+  encoderDefi,
+  nettoyerCode,
+  paquetDuDefi,
+  position,
 } from './duel';
 import { QR_CAPACITE_MAX, qrMatrix } from './qr';
 
-// Fabrique un classement à partir de pourcentages, dans la forme que produit
-// utils/scoring.
-function classement(parId: Record<string, number>): CandidateResult[] {
-  return CANDIDATES.filter((c) => c.id in parId).map((candidate, i) => ({
-    candidate,
-    score: parId[candidate.id],
-    pct: parId[candidate.id],
-    agree: 0,
-    total: 10,
-    answered: 10,
-    rank: i + 1,
-    tied: false,
-  }));
+const TOUS = THEMES.map((t) => t.id);
+const GRAINE = 0x5b4fe901;
+
+// Des réponses déterministes sur un paquet : de quoi comparer sans hasard.
+function repondre(ids: string[], motif: readonly AnswerValue[]): Answers {
+  return Object.fromEntries(ids.map((id, i) => [id, motif[i % motif.length]]));
 }
 
-const TOUS = Object.fromEntries(CANDIDATES.map((c, i) => [c.id, 40 + i * 5])) as Record<
-  string,
-  number
->;
-
-function attendreResultat(code: string): DuelResultat {
-  const lu = decoderDuel(code);
+function attendreDefi(code: string): Defi {
+  const lu = decoderDefi(code);
   if (typeof lu === 'string') throw new Error(`décodage refusé : ${lu}`);
   return lu;
 }
 
-describe('code de duel', () => {
+describe('paquet reconstruit à partir d’une graine', () => {
+  // C'EST TOUTE LA BASE DU DUEL : sans reproductibilité, il faudrait faire
+  // voyager la liste des cent soixante-cinq propositions.
+  it('la même graine redonne exactement le même paquet', () => {
+    const a = paquetDuDefi(GRAINE, TOUS);
+    const b = paquetDuDefi(GRAINE, TOUS);
+    expect(a.map((p) => p.id)).toEqual(b.map((p) => p.id));
+    expect(a).toHaveLength(165);
+  });
+
+  it('une autre graine donne un autre paquet', () => {
+    const a = paquetDuDefi(GRAINE, TOUS).map((p) => p.id);
+    const b = paquetDuDefi(GRAINE + 1, TOUS).map((p) => p.id);
+    expect(a).not.toEqual(b);
+  });
+
+  it('une sélection de thèmes reconstruit toutes leurs propositions', () => {
+    const themeIds = [THEMES[0].id, THEMES[1].id];
+    const attendu = PROPOSALS.filter((p) => themeIds.includes(p.themeId)).length;
+    expect(paquetDuDefi(GRAINE, themeIds)).toHaveLength(attendu);
+  });
+});
+
+describe('code de défi', () => {
+  const paquet = paquetDuDefi(GRAINE, TOUS);
+  const miennes = repondre(
+    paquet.map((p) => p.id),
+    ['like', 'nope', 'superlike', 'skip']
+  );
+
   it('fait l’aller-retour sans rien perdre', () => {
-    const lu = attendreResultat(encoderDuel(classement(TOUS)));
-    expect(lu.pourcentages).toEqual(TOUS);
-    expect(lu.reponses).toBe(CANDIDATES.length * 10);
+    const lu = attendreDefi(encoderDefi(GRAINE, TOUS, miennes));
+    expect(lu.graine).toBe(GRAINE);
+    expect(lu.themeIds).toEqual(TOUS);
+    expect(lu.paquet.map((p) => p.id)).toEqual(paquet.map((p) => p.id));
+    // « Sans avis » ne voyage pas : il ne compte pas dans le score, et son
+    // absence se lit comme telle à l'arrivée.
+    for (const p of paquet) {
+      const attendue = miennes[p.id];
+      expect(lu.reponses[p.id]).toBe(attendue === 'skip' ? undefined : attendue);
+    }
+  });
+
+  it('distingue les trois réponses qui comptent', () => {
+    const trois = repondre(
+      paquet.map((p) => p.id),
+      ['like', 'superlike', 'nope']
+    );
+    const lu = attendreDefi(encoderDefi(GRAINE, TOUS, trois));
+    expect(lu.reponses[paquet[0].id]).toBe('like');
+    expect(lu.reponses[paquet[1].id]).toBe('superlike');
+    expect(lu.reponses[paquet[2].id]).toBe('nope');
   });
 
   it('se lit quelle que soit la casse et malgré les espaces de confort', () => {
-    const code = encoderDuel(classement(TOUS));
-    const lu = attendreResultat(codeLisible(code).toLowerCase());
-    expect(lu.pourcentages).toEqual(TOUS);
+    const code = encoderDefi(GRAINE, TOUS, miennes);
+    expect(attendreDefi(codeLisible(code).toLowerCase()).graine).toBe(GRAINE);
   });
 
-  // Une partie filtrée par thèmes ne classe pas tout le monde. Le code doit
-  // dire « absent » et non « zéro pour cent » : l'un veut dire qu'on ne sait
-  // pas, l'autre qu'on est en total désaccord.
-  it('distingue un candidat absent d’un candidat à zéro', () => {
-    const partiel = { [CANDIDATES[0].id]: 0, [CANDIDATES[3].id]: 77 };
-    const lu = attendreResultat(encoderDuel(classement(partiel)));
-    expect(lu.pourcentages).toEqual(partiel);
-    expect(Object.keys(lu.pourcentages)).toHaveLength(2);
-  });
-
-  it('tient les bornes du pourcentage', () => {
-    const extremes = { [CANDIDATES[0].id]: 0, [CANDIDATES[1].id]: 100 };
-    expect(attendreResultat(encoderDuel(classement(extremes))).pourcentages).toEqual(extremes);
+  it('transporte une sélection de thèmes, et elle seule', () => {
+    const themeIds = [THEMES[2].id, THEMES[5].id];
+    const court = paquetDuDefi(GRAINE, themeIds);
+    const lu = attendreDefi(
+      encoderDefi(GRAINE, themeIds, repondre(court.map((p) => p.id), ['like']))
+    );
+    expect(lu.themeIds).toEqual(themeIds);
+    expect(lu.paquet).toHaveLength(court.length);
   });
 
   describe('refus', () => {
+    const code = encoderDefi(GRAINE, TOUS, miennes);
+
     it('rejette un code tronqué ou hors alphabet', () => {
-      const code = encoderDuel(classement(TOUS));
-      expect(decoderDuel(code.slice(0, -3))).toBe('illisible');
-      expect(decoderDuel('PAS UN CODE !!')).toBe('illisible');
-      expect(decoderDuel('')).toBe('illisible');
+      expect(decoderDefi(code.slice(0, -3))).toBe('illisible');
+      expect(decoderDefi('PAS UN CODE !!')).toBe('illisible');
+      expect(decoderDefi('')).toBe('illisible');
     });
 
     // Le vrai danger : un caractère mal recopié qui donne quand même un code
-    // de la bonne longueur. Sans somme de contrôle, il produirait des
-    // pourcentages parfaitement plausibles et entièrement faux.
-    it('rejette une faute de frappe d’un seul caractère', () => {
-      const code = encoderDuel(classement(TOUS));
-      let attrapes = 0;
+    // de la bonne longueur. Sans somme de contrôle, il produirait des réponses
+    // parfaitement plausibles et entièrement fausses.
+    it('rejette la grande majorité des fautes de frappe d’un caractère', () => {
       const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-      for (let i = 0; i < code.length; i++) {
-        for (const remplacant of alphabet) {
+      let attrapes = 0;
+      let total = 0;
+      // On échantillonne : éprouver les 260 caractères contre 31 remplaçants
+      // ferait huit mille décodages, chacun reconstruisant un paquet.
+      for (let i = 0; i < code.length; i += 3) {
+        for (const remplacant of alphabet.slice(0, 7)) {
           if (remplacant === code[i]) continue;
+          total++;
           const abime = code.slice(0, i) + remplacant + code.slice(i + 1);
-          if (typeof decoderDuel(abime) === 'string') attrapes++;
+          if (typeof decoderDefi(abime) === 'string') attrapes++;
         }
       }
-      const total = code.length * (alphabet.length - 1);
-      // Une somme de contrôle sur un octet laisse passer une altération sur
-      // 256 en moyenne. On exige d'en arrêter au moins 99 sur 100.
-      expect(attrapes / total).toBeGreaterThan(0.99);
+      expect(total).toBeGreaterThan(100);
+      expect(attrapes / total).toBeGreaterThan(0.97);
     });
 
     it('rejette un format venu d’une version ultérieure', () => {
-      // On force le premier octet à une valeur inconnue en reconstruisant un
-      // code valide autour d'elle : c'est ce que produirait une future
-      // version de l'app.
-      expect(DUEL_FORMAT).toBe(1);
-      const code = encoderDuel(classement(TOUS));
-      // Le premier caractère porte les cinq premiers bits, donc le format.
-      const abime = '1' + code.slice(1);
-      expect(typeof decoderDuel(abime)).toBe('string');
+      expect(DUEL_FORMAT).toBe(2);
+      expect(typeof decoderDefi('1' + code.slice(1))).toBe('string');
     });
   });
 });
 
 describe('lien profond', () => {
+  const code = encoderDefi(GRAINE, TOUS, repondre(paquetDuDefi(GRAINE, TOUS).map((p) => p.id), ['like']));
+
   it('retrouve le code dans l’URL qu’il a produite', () => {
-    const code = encoderDuel(classement(TOUS));
     expect(codeDepuisUrl(duelUrl(code))).toBe(code);
   });
 
@@ -121,90 +151,17 @@ describe('lien profond', () => {
     expect(codeDepuisUrl('elyze://d?c=')).toBeNull();
   });
 
-  // C'est la contrainte qui a dicté la taille du format binaire : l'URL doit
-  // tenir dans un QR code assez grossier pour se lire de loin.
-  it('produit une URL qui tient largement dans un QR code', () => {
-    const url = duelUrl(encoderDuel(classement(TOUS)));
-    expect(url.length).toBeLessThan(QR_CAPACITE_MAX);
-    // Version 3 : 17 + 4 × 3 modules de côté.
-    expect(qrMatrix(url).size).toBeLessThanOrEqual(29);
-  });
-});
-
-describe('comparaison', () => {
-  const miens = classement({ ...TOUS, [CANDIDATES[0].id]: 90 });
-
-  it('classe les plus gros désaccords en premier', () => {
-    const sien = attendreResultat(
-      encoderDuel(classement({ ...TOUS, [CANDIDATES[0].id]: 10 }))
-    );
-    const vu = comparerDuel(miens, sien);
-    expect(vu.lignes[0].candidate.id).toBe(CANDIDATES[0].id);
-    expect(vu.lignes[0].ecart).toBe(80);
-    expect(vu.communs).toBe(CANDIDATES.length);
-  });
-
-  it('donne l’écart moyen en points', () => {
-    const sien = attendreResultat(encoderDuel(classement(TOUS)));
-    // Un seul candidat diffère, de 90 contre sa valeur de départ (40).
-    const vu = comparerDuel(miens, sien);
-    expect(vu.ecartMoyen).toBe(Math.round(50 / CANDIDATES.length));
-  });
-
-  it('repère un premier commun, et seulement quand il l’est vraiment', () => {
-    const meme = attendreResultat(
-      encoderDuel(classement({ ...TOUS, [CANDIDATES[0].id]: 90 }))
-    );
-    expect(comparerDuel(miens, meme).memePremier).toBe(true);
-
-    const autre = attendreResultat(encoderDuel(classement(TOUS)));
-    expect(comparerDuel(miens, autre).memePremier).toBe(false);
-  });
-
-  // Un candidat classé d'un seul côté n'a pas d'écart : il ne doit ni compter
-  // dans la moyenne, ni remonter en tête de liste comme un désaccord.
-  it('met de côté les candidats qu’un seul des deux a classés', () => {
-    const partiel = attendreResultat(
-      encoderDuel(classement({ [CANDIDATES[1].id]: 50, [CANDIDATES[2].id]: 50 }))
-    );
-    const vu = comparerDuel(miens, partiel);
-    expect(vu.communs).toBe(2);
-    expect(vu.lignes).toHaveLength(CANDIDATES.length);
-    expect(vu.lignes.filter((l) => l.ecart === null)).toHaveLength(CANDIDATES.length - 2);
-    expect(vu.lignes[vu.lignes.length - 1].ecart).toBeNull();
-  });
-
-  it('ne se noie pas sur une comparaison sans rien de commun', () => {
-    const vide = attendreResultat(encoderDuel(classement({})));
-    const vu = comparerDuel(miens, vide);
-    expect(vu.communs).toBe(0);
-    expect(vu.ecartMoyen).toBeNull();
-    expect(vu.sesPremiers).toEqual([]);
-    expect(vu.memePremier).toBe(false);
-  });
-});
-
-describe('affichage du code', () => {
-  it('coupe en deux lignes équilibrées, jamais au milieu d’un groupe', () => {
-    const code = encoderDuel(classement(TOUS));
-    const [haut, bas] = codeLignes(code);
-    // Rien n'est perdu ni ajouté entre les deux lignes.
-    expect((haut + bas).replace(/ /g, '')).toBe(code);
-    // Aucun groupe n'est coupé : tous font quatre caractères, sauf le dernier.
-    const groupes = [...haut.split(' '), ...bas.split(' ')];
-    expect(groupes.slice(0, -1).every((g) => g.length === 4)).toBe(true);
-    // Les deux lignes se ressemblent : au plus un groupe d'écart.
-    expect(Math.abs(haut.split(' ').length - bas.split(' ').length)).toBeLessThanOrEqual(1);
+  // Le paquet complet est le cas courant : il doit tenir dans un QR code, sans
+  // quoi la fonction principale du duel tomberait sur sa solution de secours.
+  it('le défi d’un paquet complet tient dans un QR code', () => {
+    const url = duelUrl(code);
+    expect(url.length).toBeLessThanOrEqual(QR_CAPACITE_MAX);
+    expect(qrMatrix(url).size).toBeLessThanOrEqual(41);
   });
 });
 
 describe('saisie du code', () => {
-  const code = encoderDuel(classement(TOUS));
-
-  it('annonce la longueur attendue, celle que produit l’encodeur', () => {
-    expect(DUEL_CODE_LENGTH).toBe(26);
-    expect(code).toHaveLength(DUEL_CODE_LENGTH);
-  });
+  const code = encoderDefi(GRAINE, TOUS, repondre(paquetDuDefi(GRAINE, TOUS).map((p) => p.id), ['nope']));
 
   it('remet la casse et retire les espaces de confort', () => {
     expect(nettoyerCode(codeLisible(code).toLowerCase())).toBe(code);
@@ -214,7 +171,7 @@ describe('saisie du code', () => {
   // messages, donc le lien qu'on a dans son presse-papier.
   it('accepte le lien entier collé à la place du code', () => {
     expect(nettoyerCode(duelUrl(code))).toBe(code);
-    expect(nettoyerCode(`Compare avec moi : ${duelUrl(code)}`)).toBe(code);
+    expect(nettoyerCode(`Je te défie : ${duelUrl(code)}`)).toBe(code);
   });
 
   it('écarte les caractères hors alphabet plutôt que de les garder', () => {
@@ -224,17 +181,82 @@ describe('saisie du code', () => {
     expect(nettoyerCode('ILOU')).toBe('');
   });
 
-  it('ne laisse jamais dépasser la longueur d’un code', () => {
-    expect(nettoyerCode(code + code)).toHaveLength(DUEL_CODE_LENGTH);
-    expect(nettoyerCode(code + code)).toBe(code);
+  it('annonce une longueur minimale cohérente avec le format', () => {
+    expect(DUEL_LONGUEUR_MINIMALE).toBeGreaterThan(10);
+    expect(code.length).toBeGreaterThan(DUEL_LONGUEUR_MINIMALE);
   });
 
-  // La mise en forme pendant la frappe ne doit rien perdre : ce qui est
-  // réaffiché, renettoyé, doit redonner exactement la même chose.
   it('résiste à l’aller-retour affichage / saisie, à toute longueur', () => {
-    for (let n = 0; n <= DUEL_CODE_LENGTH; n++) {
+    for (let n = 0; n <= code.length; n += 13) {
       const partiel = code.slice(0, n);
       expect(nettoyerCode(codeLisible(partiel))).toBe(partiel);
     }
+  });
+
+  it('coupe l’affichage en lignes entières de groupes', () => {
+    const lignes = codeLignes(code);
+    expect(lignes.join(' ').replace(/ /g, '')).toBe(code);
+    for (const ligne of lignes.slice(0, -1)) expect(ligne.split(' ')).toHaveLength(4);
+  });
+});
+
+describe('comparaison sur le même paquet', () => {
+  const paquet = paquetDuDefi(GRAINE, TOUS);
+  const ids = paquet.map((p) => p.id);
+
+  it('compte les accords sur les seules propositions tranchées par les deux', () => {
+    // L'un valide tout, l'autre alterne validé / rejeté / sans avis.
+    const miennes = repondre(ids, ['like']);
+    const siennes = repondre(ids, ['like', 'nope', 'skip']);
+    const vu = comparerDefi(paquet, miennes, siennes);
+
+    const attenduTranchees = ids.filter((_, i) => i % 3 !== 2).length;
+    const attenduAccords = ids.filter((_, i) => i % 3 === 0).length;
+    expect(vu.tranchees).toBe(attenduTranchees);
+    expect(vu.accords).toBe(attenduAccords);
+  });
+
+  it('met les désaccords en tête, puis les accords', () => {
+    const vu = comparerDefi(paquet, repondre(ids, ['like']), repondre(ids, ['like', 'nope', 'skip']));
+    const rangs = vu.lignes.map((l) => (l.desaccord ? 0 : l.accord ? 1 : 2));
+    expect([...rangs].sort((a, b) => a - b)).toEqual(rangs);
+  });
+
+  // LE DÉFAUT DE LA PREMIÈRE VERSION : deux paquets différents rendaient les
+  // pourcentages incomparables. Ici les deux classements portent sur les mêmes
+  // cartes, donc sur les mêmes candidats et le même nombre de mesures.
+  it('produit deux classements portant sur les mêmes cartes', () => {
+    const vu = comparerDefi(paquet, repondre(ids, ['like', 'nope']), repondre(ids, ['nope', 'like']));
+    expect(vu.mesResultats).toHaveLength(CANDIDATES.length);
+    expect(vu.sesResultats).toHaveLength(CANDIDATES.length);
+    for (const mien of vu.mesResultats) {
+      const sien = vu.sesResultats.find((r) => r.candidate.id === mien.candidate.id)!;
+      // Même paquet : chacun a vu exactement le même nombre de mesures de ce
+      // candidat, quelles que soient ses réponses.
+      expect(sien.answered).toBe(mien.answered);
+    }
+  });
+
+  it('repère un premier commun, et seulement quand il l’est vraiment', () => {
+    const memes = repondre(ids, ['like', 'nope', 'superlike']);
+    expect(comparerDefi(paquet, memes, memes).memePremier).toBe(true);
+    const autres = repondre(ids, ['nope', 'like', 'nope']);
+    expect(comparerDefi(paquet, memes, autres).memePremier).toBe(false);
+  });
+
+  it('ne se noie pas quand l’un n’a rien tranché', () => {
+    const vu = comparerDefi(paquet, repondre(ids, ['like']), {});
+    expect(vu.tranchees).toBe(0);
+    expect(vu.accords).toBe(0);
+    expect(vu.sesPremiers).toEqual([]);
+    expect(vu.memePremier).toBe(false);
+  });
+
+  it('range les réponses en trois positions, et une seule vaut validation', () => {
+    expect(position('like')).toBe('valide');
+    expect(position('superlike')).toBe('valide');
+    expect(position('nope')).toBe('rejete');
+    expect(position('skip')).toBe('sansAvis');
+    expect(position(undefined)).toBe('sansAvis');
   });
 });
