@@ -25,18 +25,18 @@ export const FEEDBACK_EMAIL = 'elyze2027@ik.me';
 
 export type FeedbackKind = 'bug' | 'idee' | 'avis';
 
-// UN MODÈLE PAR NATURE DE RETOUR, ET UNE SECTION DE PLUS POUR LE BUG.
+// UN MODÈLE PAR NATURE DE RETOUR, ET UNE SEULE CASE.
 //
-// Les trois retours n'appellent pas le même effort. Une idée ou un avis tient
-// dans un paragraphe, et un formulaire en plusieurs cases y serait une
-// paperasse qui décourage d'écrire. Un rapport de bug, lui, est presque
-// inutile sans la manière de le refaire : « la carte reste blanche » n'a
-// jamais permis de corriger quoi que ce soit, tandis que trois lignes de
-// marche à suivre transforment une énigme en correction d'un quart d'heure.
+// Le bug a un temps eu sa propre case « comment le refaire », au motif qu'un
+// rapport sans marche à suivre se corrige rarement. C'était vrai, et c'était
+// tout de même une mauvaise idée : deux zones de texte dans une fenêtre posée
+// sur les réglages, cela ressemble à un formulaire administratif, et un
+// formulaire décourage d'écrire bien plus sûrement qu'une consigne manquante
+// ne gêne la correction.
 //
-// D'où la seconde case, offerte au seul bug, et facultative : elle disparaît
-// du courriel si elle est laissée vide, plutôt que d'y laisser un intertitre
-// suivi de rien.
+// La demande n'a pas disparu pour autant, elle a changé de forme : le
+// filigrane du bug l'appelle en une phrase. Qui a la marche à suivre l'écrira
+// dans la foulée ; qui ne l'a pas ne se sera pas heurté à une case vide.
 export type FeedbackKindInfo = {
   kind: FeedbackKind;
   label: string;
@@ -50,8 +50,6 @@ export type FeedbackKindInfo = {
   // Texte affiché en filigrane dans le champ de saisie. Il appelle le détail
   // utile à CE type de retour, plutôt qu'un « ton message » universel.
   placeholder: string;
-  // Seconde case, facultative, propre à certaines natures de retour.
-  complement?: { champ: string; placeholder: string };
 };
 
 export const FEEDBACK_KINDS: FeedbackKindInfo[] = [
@@ -60,11 +58,8 @@ export const FEEDBACK_KINDS: FeedbackKindInfo[] = [
     label: 'Un bug',
     subject: 'Bug',
     champ: 'Ce qui s’est passé',
-    placeholder: 'Décris ce que tu as vu, et ce que tu attendais à la place.',
-    complement: {
-      champ: 'Comment le refaire',
-      placeholder: '1. j’ouvre l’app\n2. je vais sur…\n3. et là…',
-    },
+    placeholder:
+      'Ce que tu as vu, et ce que tu attendais à la place. Si tu sais le refaire, dis comment.',
   },
   {
     kind: 'idee',
@@ -93,22 +88,16 @@ export const FEEDBACK_KINDS_BY_ID: Record<FeedbackKind, FeedbackKindInfo> = Obje
 // caractères. Un message coupé au milieu d'une phrase, sans que rien ne
 // l'annonce, serait le pire des comportements.
 //
-// CES DEUX NOMBRES SONT CALCULÉS À L'ENVERS, DEPUIS LE PIRE CAS. Ce qui
-// compte n'est pas la longueur du texte mais celle de l'URL une fois
-// échappée, et l'échappement n'a pas un coût fixe : un « é » devient `%C3%A9`
-// et un retour à la ligne `%0A`, si bien qu'un texte fait uniquement de
-// lettres accentuées et de retours à la ligne pèse quatre fois et demie son
-// poids. Une première version tenait 1500 et 600 caractères, ce qui donnait
-// 9718 caractères d'URL dans ce cas extrême, au-delà du budget qu'on se
-// fixe. Les valeurs ci-dessous le ramènent sous 8000, mesuré par un test.
+// CE NOMBRE EST CALCULÉ À L'ENVERS, DEPUIS LE PIRE CAS. Ce qui compte n'est
+// pas la longueur du texte mais celle de l'URL une fois échappée, et
+// l'échappement n'a pas un coût fixe : un « é » devient `%C3%A9` et un retour
+// à la ligne `%0A`, si bien qu'un texte fait uniquement de lettres accentuées
+// et de retours à la ligne pèse quatre fois et demie son poids. Un test mesure
+// ce cas extrême et exige que l'URL reste sous 8000 caractères.
 //
-// Le prix payé est nul en pratique : 1200 caractères font environ deux cents
-// mots, et la marche à suivre a désormais sa propre case.
+// 1200 caractères font environ deux cents mots : la borne ne se rencontre pas
+// en écrivant un retour ordinaire.
 export const FEEDBACK_MAX = 1200;
-
-// La seconde case est plus courte : une marche à suivre tient en quelques
-// lignes numérotées.
-export const FEEDBACK_MAX_COMPLEMENT = 400;
 
 // Contexte technique, en clair et lisible par la personne qui l'envoie.
 //
@@ -139,21 +128,14 @@ export function feedbackContext(): string {
 // amputé sans qu'aucune erreur ne soit levée.
 const FILET = '-----';
 
-export function buildFeedbackMailto(
-  kind: FeedbackKind,
-  message: string,
-  complement = ''
-): string {
+export function buildFeedbackMailto(kind: FeedbackKind, message: string): string {
   const info = FEEDBACK_KINDS_BY_ID[kind];
   const objet = `Élyze ${APP_VERSION} · ${info.subject}`;
 
-  const blocs = [`${info.champ.toUpperCase()}\n${message.trim()}`];
-  // La section ne paraît que si elle a quelque chose à dire.
-  if (info.complement && complement.trim()) {
-    blocs.push(`${info.complement.champ.toUpperCase()}\n${complement.trim()}`);
-  }
-  blocs.push(`${FILET}\n${feedbackContext()}\nÉcrit depuis les réglages de l’application.`);
+  const corps = [
+    `${info.champ.toUpperCase()}\n${message.trim()}`,
+    `${FILET}\n${feedbackContext()}\nÉcrit depuis les réglages de l’application.`,
+  ].join('\n\n');
 
-  const corps = blocs.join('\n\n');
   return `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(objet)}&body=${encodeURIComponent(corps)}`;
 }

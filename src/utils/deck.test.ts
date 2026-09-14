@@ -1,4 +1,4 @@
-import { buildDeck, candidatesQuota } from './deck';
+import { buildDeck, buildSessionDeck, candidatesQuota } from './deck';
 import { Proposal } from '../types';
 import { PROPOSALS } from '../data/proposals';
 
@@ -110,5 +110,43 @@ describe('sur le vivier réel embarqué', () => {
     // Le vivier fait environ deux fois le paquet : on attend grosso modo la
     // moitié de cartes nouvelles. On vérifie surtout qu'il y en a vraiment.
     expect(communes).toBeLessThan(b.length * 0.85);
+  });
+});
+
+describe('composition du paquet selon l’étendue de la sélection', () => {
+  // LE DÉFAUT CORRIGÉ : sur un thème où le candidat le moins prolixe n'a
+  // qu'une seule mesure, le quota ramenait TOUT LE MONDE à une carte. On
+  // choisissait un sujet de trente propositions et la partie en servait
+  // quelques-unes.
+  const inegal = pool({ a: 12, b: 9, c: 1 });
+
+  it('sur une sélection de thèmes, prend toutes les propositions', () => {
+    const paquet = buildSessionDeck(inegal, false);
+    expect(paquet).toHaveLength(inegal.length);
+    // Rien n'est perdu ni dupliqué : c'est le même ensemble, mélangé.
+    expect(new Set(paquet.map((p) => p.id))).toEqual(new Set(inegal.map((p) => p.id)));
+  });
+
+  it('sur tous les thèmes, garde le quota qui égalise les candidats', () => {
+    const paquet = buildSessionDeck(inegal, true);
+    const parCandidat = new Map<string, number>();
+    for (const p of paquet) parCandidat.set(p.candidateId, (parCandidat.get(p.candidateId) ?? 0) + 1);
+    // Le plus petit vivier vaut 1 : tout le monde y est ramené.
+    expect([...parCandidat.values()]).toEqual([1, 1, 1]);
+  });
+
+  it('ne laisse plus une sélection tomber à une poignée de cartes', () => {
+    const avant = buildDeck(inegal, 15).length;
+    const apres = buildSessionDeck(inegal, false).length;
+    expect(avant).toBe(3);
+    expect(apres).toBe(22);
+  });
+
+  it('mélange, pour que les cartes ne sortent pas candidat par candidat', () => {
+    const paquet = buildSessionDeck(pool({ a: 20, b: 20 }), false);
+    // Sans mélange, les vingt premières cartes seraient toutes du même
+    // candidat, ce qui laisserait deviner qui porte quoi.
+    const vingtPremiers = new Set(paquet.slice(0, 20).map((p) => p.candidateId));
+    expect(vingtPremiers.size).toBe(2);
   });
 });

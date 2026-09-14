@@ -60,7 +60,7 @@ const SECTIONS: { icon: string; title: string; body: string }[] = [
     icon: '⚖️',
     title: 'Pourquoi le même nombre de propositions pour tous',
     body:
-      'Les programmes n’ont pas la même taille : certains comptent des centaines de mesures, d’autres une vingtaine. Si un candidat occupait la moitié du paquet, il gagnerait mécaniquement. L’app retient donc exactement quinze propositions par candidat, réparties sur ses différents thèmes, et un candidat qui n’en aurait pas assez de publiées ne peut pas figurer dans la comparaison. Chacun pèse ainsi le même poids dans ton résultat.',
+      'Les programmes n’ont pas la même taille : certains comptent des centaines de mesures, d’autres une vingtaine. Si un candidat occupait la moitié du paquet, il gagnerait mécaniquement. Sur la partie complète, l’app retient donc exactement quinze propositions par candidat, réparties sur ses différents thèmes, et un candidat qui n’en aurait pas assez de publiées ne peut pas figurer dans la comparaison. Quand tu choisis des thèmes en particulier, le paquet prend au contraire toutes leurs propositions : les candidats n’y sont plus à égalité de nombre, mais le pourcentage reste une proportion, et celui dont on a vu peu de mesures reste tiré vers 50 %.',
   },
   {
     icon: '🔒',

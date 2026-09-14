@@ -7,7 +7,6 @@ import {
   FEEDBACK_KINDS,
   FEEDBACK_KINDS_BY_ID,
   FEEDBACK_MAX,
-  FEEDBACK_MAX_COMPLEMENT,
 } from './feedback';
 
 // Le corps du courriel, décodé, tel qu'il arrivera dans la boîte.
@@ -38,6 +37,9 @@ describe('brouillon de retour', () => {
       expect(info.subject.length).toBeGreaterThan(2);
       expect(info.champ.length).toBeGreaterThan(2);
       expect(info.placeholder.length).toBeGreaterThan(20);
+      // Le bug n'a plus de seconde case : son filigrane doit donc appeler
+      // lui-même la marche à suivre, sans quoi le renseignement se perd.
+      if (info.kind === 'bug') expect(info.placeholder).toMatch(/refaire/);
       expect(FEEDBACK_KINDS_BY_ID[info.kind]).toBe(info);
     }
   });
@@ -55,25 +57,9 @@ describe('brouillon de retour', () => {
       expect(vu).toContain('L’IDÉE\nun mode sombre pour les cartes');
     });
 
-    it('ajoute la marche à suivre du bug quand elle est renseignée', () => {
-      const vu = corps(
-        buildFeedbackMailto('bug', 'la carte reste blanche', '1. j’ouvre\n2. je reviens')
-      );
+    it('range le message du bug sous sa propre question', () => {
+      const vu = corps(buildFeedbackMailto('bug', 'la carte reste blanche'));
       expect(vu).toContain('CE QUI S’EST PASSÉ\nla carte reste blanche');
-      expect(vu).toContain('COMMENT LE REFAIRE\n1. j’ouvre\n2. je reviens');
-    });
-
-    // Un intertitre suivi de rien est pire que pas d'intertitre du tout.
-    it('n’écrit pas la section vide quand la marche à suivre est laissée blanche', () => {
-      for (const vide of ['', '   ', '\n\n']) {
-        const vu = corps(buildFeedbackMailto('bug', 'la carte reste blanche', vide));
-        expect(vu).not.toContain('COMMENT LE REFAIRE');
-      }
-    });
-
-    it('ignore la seconde section pour les natures qui n’en ont pas', () => {
-      const vu = corps(buildFeedbackMailto('avis', 'très bien', 'on ne devrait pas me voir'));
-      expect(vu).not.toContain('on ne devrait pas me voir');
     });
 
     it('renvoie le bloc technique en pied, sous un filet', () => {
@@ -108,12 +94,7 @@ describe('brouillon de retour', () => {
   // ligne triple de taille au passage. On mesure donc le pire cas réel.
   it('tient dans une URL mailto même rempli au maximum de caractères coûteux', () => {
     expect(FEEDBACK_MAX).toBeGreaterThan(500);
-    expect(FEEDBACK_MAX_COMPLEMENT).toBeGreaterThan(100);
-    const pire = buildFeedbackMailto(
-      'bug',
-      'é\n'.repeat(FEEDBACK_MAX / 2),
-      'é\n'.repeat(FEEDBACK_MAX_COMPLEMENT / 2)
-    );
+    const pire = buildFeedbackMailto('bug', 'é\n'.repeat(FEEDBACK_MAX / 2));
     // Android accepte des intentions bien plus longues, iOS aussi ; 8000 est
     // la borne basse prudente des implémentations rencontrées.
     expect(pire.length).toBeLessThan(8000);

@@ -4,7 +4,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,7 +16,6 @@ import {
   FEEDBACK_KINDS,
   FEEDBACK_KINDS_BY_ID,
   FEEDBACK_MAX,
-  FEEDBACK_MAX_COMPLEMENT,
   FeedbackKind,
   feedbackContext,
 } from '../data/feedback';
@@ -26,15 +24,21 @@ import { useColors } from '../theme/ThemeContext';
 
 // Signaler un bug, proposer une idée, donner un avis.
 //
-// CE QUI EST À L'ÉCRAN EN PERMANENCE : le choix de la nature, la ou les cases
-// à remplir, un bouton. Rien d'autre.
+// CE QUI EST À L'ÉCRAN : le choix de la nature, une case, un bouton.
 //
-// Une version précédente affichait aussi un paragraphe d'accueil et un
-// encadré de six lignes expliquant que l'app ne se connecte à aucun serveur.
-// Les deux disaient des choses justes, et tous deux repoussaient le bouton
-// hors de l'écran dès que le clavier s'ouvrait : on lisait une explication
-// qu'on n'avait pas demandée avant d'atteindre la seule chose qu'on était
-// venu faire.
+// Il y en a eu davantage, et chaque retrait a eu sa raison. Un paragraphe
+// d'accueil disait ce que le titre disait déjà. Un encadré de six lignes sur
+// l'absence de serveur repoussait le bouton hors de l'écran dès l'ouverture du
+// clavier. Une seconde case demandait au bug sa marche à suivre : bonne
+// intention, mais deux zones de texte dans une fenêtre posée sur les réglages,
+// cela ressemble à un formulaire administratif, et un formulaire décourage
+// d'écrire plus sûrement qu'une consigne manquante ne gêne la correction.
+//
+// LA TYPOGRAPHIE SUIT LE MÊME PRINCIPE. Les intitulés étaient en capitales
+// espacées et les trois natures en pastilles pleines sur un rail : beaucoup
+// d'appareil pour une fenêtre qu'on ouvre trente secondes. Les intitulés sont
+// redevenus des phrases, et la nature retenue se signale par une teinte
+// plutôt que par un aplat.
 //
 // LA PROMESSE RESTE, ELLE A CHANGÉ DE PLACE. Elle vit derrière le « i » de
 // l'entête, à un toucher, et elle est écrite là où elle est utile : quand on
@@ -48,7 +52,6 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [kind, setKind] = useState<FeedbackKind>('bug');
   const [message, setMessage] = useState('');
-  const [complement, setComplement] = useState('');
   const [infoOuverte, setInfoOuverte] = useState(false);
 
   // Une boîte rouverte repart à vide, explication repliée comprise. Retrouver
@@ -58,7 +61,6 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
     if (visible) {
       setKind('bug');
       setMessage('');
-      setComplement('');
       setInfoOuverte(false);
     }
   }, [visible]);
@@ -68,7 +70,7 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
 
   const envoyer = () => {
     if (!pret) return;
-    openUrl(buildFeedbackMailto(kind, message, complement));
+    openUrl(buildFeedbackMailto(kind, message));
     onClose();
   };
 
@@ -149,11 +151,7 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
               })}
             </View>
 
-            <ScrollView
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.champs}
-            >
+            <View style={styles.champs}>
               {/* L'intitulé du champ est celui-là même qui servira
                   d'intertitre dans le courriel : ce qu'on écrit ici arrive
                   là-bas sous la question à laquelle on répond. */}
@@ -176,30 +174,7 @@ export function FeedbackDialog({ visible, onClose }: { visible: boolean; onClose
                   {message.length} / {FEEDBACK_MAX}
                 </Text>
               )}
-
-              {/* Seconde case, réservée au bug : sans marche à suivre, un
-                  défaut se corrige rarement. Facultative, et absente du
-                  courriel si on la laisse vide. */}
-              {info.complement && (
-                <>
-                  <View style={styles.champEntete}>
-                    <Text style={styles.champTitre}>{info.complement.champ}</Text>
-                    <Text style={styles.facultatif}>facultatif</Text>
-                  </View>
-                  <TextInput
-                    style={[styles.input, styles.inputCourt]}
-                    value={complement}
-                    onChangeText={setComplement}
-                    placeholder={info.complement.placeholder}
-                    placeholderTextColor={colors.textMuted}
-                    multiline
-                    textAlignVertical="top"
-                    maxLength={FEEDBACK_MAX_COMPLEMENT}
-                    accessibilityLabel={`${info.complement.champ}, facultatif`}
-                  />
-                </>
-              )}
-            </ScrollView>
+            </View>
 
             {/* UNE SEULE ACTION EN BAS. « Annuler » y tenait la moitié de la
                 largeur pour une sortie déjà offerte deux fois — la croix de
@@ -269,7 +244,7 @@ function makeStyles(colors: ColorTokens) {
     },
     title: {
       flex: 1,
-      fontSize: fonts.body + 2,
+      fontSize: fonts.body + 1,
       fontWeight: '800',
       color: colors.textPrimary,
     },
@@ -298,12 +273,12 @@ function makeStyles(colors: ColorTokens) {
       padding: spacing.sm + 2,
     },
 
+    // Trois choix posés sur le fond de la boîte, sans rail ni aplat. Le rail
+    // gris plus l'aplat d'accent faisaient de ce simple choix l'élément le
+    // plus appuyé de la fenêtre, avant même la case où l'on écrit.
     kindRow: {
       flexDirection: 'row',
-      backgroundColor: colors.surfaceAlt,
-      borderRadius: radii.pill,
-      padding: 4,
-      gap: 4,
+      gap: spacing.xs,
     },
     kind: {
       flex: 1,
@@ -312,40 +287,32 @@ function makeStyles(colors: ColorTokens) {
       borderRadius: radii.pill,
     },
     kindActive: {
-      backgroundColor: colors.accent,
+      backgroundColor: colors.accentSoft,
     },
     kindText: {
-      fontSize: fonts.tiny + 1,
-      fontWeight: '700',
+      fontSize: fonts.small,
+      fontWeight: '600',
       color: colors.textSecondary,
     },
+    // `accentText` est le jeton prévu pour de l'accent en texte sur un fond
+    // neutre ou `accentSoft` : c'est exactement ce cas, et il tient le
+    // contraste là où `accent` ne le tiendrait pas.
     kindTextActive: {
-      color: colors.onAccent,
+      color: colors.accentText,
+      fontWeight: '800',
     },
 
     champs: {
       gap: spacing.xs,
-      paddingBottom: spacing.xs,
     },
     // Intitulé de case. Il porte le même mot que l'intertitre du courriel,
-    // pour qu'on sache en écrivant sous quel titre le texte arrivera.
+    // pour qu'on sache en écrivant sous quel titre le texte arrivera. En
+    // phrase et non en capitales espacées : c'est une question posée, pas
+    // l'étiquette d'un bordereau.
     champTitre: {
-      fontSize: fonts.tiny + 1,
-      fontWeight: '800',
-      letterSpacing: 0.4,
-      textTransform: 'uppercase',
-      color: colors.textMuted,
-      marginTop: spacing.xs,
-    },
-    champEntete: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-    facultatif: {
-      fontSize: fonts.tiny,
+      fontSize: fonts.small,
       fontWeight: '600',
-      color: colors.textMuted,
+      color: colors.textSecondary,
       marginTop: spacing.xs,
     },
     input: {
@@ -359,13 +326,6 @@ function makeStyles(colors: ColorTokens) {
       fontSize: fonts.small + 1,
       lineHeight: (fonts.small + 1) * 1.45,
       color: colors.textPrimary,
-    },
-    // La marche à suivre tient en quelques lignes : la case n'a pas à ouvrir
-    // aussi grand que celle du récit. Elle doit tout de même contenir son
-    // propre filigrane, qui fait trois lignes numérotées.
-    inputCourt: {
-      minHeight: 104,
-      maxHeight: 150,
     },
     compteur: {
       alignSelf: 'flex-end',

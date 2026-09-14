@@ -19,7 +19,7 @@ import { Answers, Proposal } from './src/types';
 import { PROPOSALS, PROPOSALS_BY_ID } from './src/data/proposals';
 import { CANDIDATES } from './src/data/candidates';
 import { THEMES, THEMES_BY_ID } from './src/data/themes';
-import { buildDeck, QUOTA_PAR_CANDIDAT } from './src/utils/deck';
+import { buildSessionDeck } from './src/utils/deck';
 import { computeResults, pickTopMatch, topMatches } from './src/utils/scoring';
 import { codeDepuisUrl } from './src/utils/duel';
 import {
@@ -319,13 +319,19 @@ function AppInner() {
   // thèmes en particulier reste possible, mais comme une option secondaire
   // (voir `handleCustomizeThemes`), pas comme une étape imposée.
   const startSession = (themeIds: string[]) => {
-    // Le paquet est TIRÉ du vivier embarqué, il ne l'est pas tout entier :
-    // l'app connaît environ deux fois plus de propositions qu'une partie n'en
-    // montre, pour qu'un deuxième passage apporte des cartes neuves. Le
-    // tirage garantit le même nombre par candidat, sans quoi le score serait
-    // faussé (voir utils/deck.ts).
+    // DEUX FAÇONS DE COMPOSER LE PAQUET, selon l'étendue de la sélection.
+    //
+    // Sur TOUS les thèmes, il est TIRÉ du vivier embarqué et non pris en
+    // entier : l'app connaît environ deux fois plus de propositions qu'une
+    // partie n'en montre, pour qu'un deuxième passage apporte des cartes
+    // neuves, et le tirage garantit le même nombre par candidat sans quoi le
+    // score serait faussé.
+    //
+    // Sur une sélection de thèmes, il prend tout ce qu'ils contiennent : le
+    // quota y ramenait la partie au candidat le moins prolixe, et on obtenait
+    // onze cartes pour un thème qui en compte trente. Voir utils/deck.ts.
     const filtered = PROPOSALS.filter((p) => themeIds.includes(p.themeId));
-    const order = buildDeck(filtered, QUOTA_PAR_CANDIDAT);
+    const order = buildSessionDeck(filtered, themeIds.length === ALL_THEME_IDS.length);
     setSelectedThemeIds(themeIds);
     setSessionProposals(order);
     setCurrentIndex(0);

@@ -22,6 +22,27 @@ import { shuffle } from './shuffle';
 // Le nombre par candidat est ramené au plus petit vivier disponible : si un
 // candidat n'a que 12 propositions dans les thèmes choisis, tout le monde en
 // aura 12. Mieux vaut un paquet plus court qu'un paquet biaisé.
+//
+// --- L'EXCEPTION DES THÈMES CHOISIS --------------------------------------
+//
+// Ce tirage vaut pour le paquet COMPLET, et seulement pour lui. Sur une
+// sélection de thèmes, il produisait des parties absurdes : un thème où le
+// candidat le moins prolixe n'a qu'une seule mesure ramenait tout le monde à
+// une carte, soit onze cartes pour un thème qui en compte trente. On
+// choisissait « Santé » et on obtenait une poignée de propositions au lieu du
+// sujet entier.
+//
+// Sur une sélection, le paquet prend donc TOUT ce que les thèmes contiennent.
+// L'égalité des quotas y est perdue, et ce n'est pas grave ici : le score est
+// un TAUX par candidat, pas une somme (voir utils/scoring.ts). Un candidat
+// avec huit mesures sur le thème n'est pas avantagé, il est simplement mesuré
+// plus finement — et le lissage bayésien tire justement vers 50 % celui dont
+// on ne sait presque rien. Le déséquilibre porte sur la fiabilité, pas sur le
+// résultat, et c'est exactement ce que le score sait déjà représenter.
+//
+// Sur le paquet complet, en revanche, l'égalité reste non négociable : là,
+// prendre tout donnerait à un programme de trois cents mesures dix fois le
+// poids d'un programme de trente.
 
 // Nombre de propositions tirées par candidat. Doit rester aligné sur
 // QUOTA_PAR_CANDIDAT de scripts/generate-data.js, qui dimensionne le vivier
@@ -35,6 +56,16 @@ export function candidatesQuota(pool: Proposal[], quota: number): number {
   for (const p of pool) parCandidat.set(p.candidateId, (parCandidat.get(p.candidateId) ?? 0) + 1);
   if (parCandidat.size === 0) return 0;
   return Math.min(quota, ...parCandidat.values());
+}
+
+// Le paquet d'une partie. `complet` dit si la sélection porte sur TOUS les
+// thèmes : c'est le seul cas où le quota par candidat s'applique.
+export function buildSessionDeck(
+  pool: Proposal[],
+  complet: boolean,
+  melange: ShuffleFn = shuffle
+): Proposal[] {
+  return complet ? buildDeck(pool, QUOTA_PAR_CANDIDAT, melange) : melange(pool);
 }
 
 export function buildDeck(

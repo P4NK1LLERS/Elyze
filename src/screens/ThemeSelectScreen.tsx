@@ -19,10 +19,10 @@ for (const p of PROPOSALS) {
   (CANDIDATES_BY_THEME[p.themeId] ??= new Set()).add(p.candidateId);
 }
 
-// En dessous de ce nombre de propositions par candidat, le pourcentage affiché
-// à la fin ne repose sur presque rien : avec une seule réponse, il ne peut
-// valoir que 0 % ou 100 %. On prévient avant de lancer, plutôt que de laisser
-// l'app afficher un podium d'apparence définitive.
+// En dessous de ce nombre de propositions, le pourcentage d'un candidat ne
+// repose sur presque rien : avec une seule réponse, il ne peut valoir que 0 %
+// ou 100 %. On prévient avant de lancer, plutôt que de laisser l'app afficher
+// un podium d'apparence définitive.
 const MIN_PAR_CANDIDAT = 3;
 
 const GROUPS = CATEGORIES.map((category) => ({
@@ -68,28 +68,25 @@ export function ThemeSelectScreen({
 
   // Ce que la sélection contient, et ce que la partie en tirera VRAIMENT.
   //
-  // Le bouton annonçait jusqu'ici la taille du vivier — la somme des mesures
-  // des thèmes cochés. Or le tirage ramène tout le monde au plus petit vivier
-  // disponible et ignore les candidats absents : sur le seul thème « Santé »,
-  // le bouton promettait 18 propositions et la partie en servait 9. On calcule
-  // donc ici exactement ce que fera utils/deck.
+  // Le bouton doit annoncer le nombre exact de cartes, et les deux modes de
+  // composition n'en donnent pas le même (voir utils/deck.ts) : sur tous les
+  // thèmes, quinze par candidat présent ; sur une sélection, la totalité des
+  // propositions de ces thèmes.
   const tirage = useMemo(() => {
-    const ids = [...selected];
-    const vivier = ids.reduce((sum, id) => sum + (COUNT_BY_THEME[id] ?? 0), 0);
-    const presents = new Set<string>();
-    for (const id of ids) {
-      for (const c of CANDIDATES_BY_THEME[id] ?? []) presents.add(c);
-    }
     const pool = PROPOSALS.filter((p) => selected.has(p.themeId));
-    const parCandidat = candidatesQuota(pool, QUOTA_PAR_CANDIDAT);
+    const presents = new Set(pool.map((p) => p.candidateId));
+    const complet = selected.size === THEMES.length;
+    // Le plus petit nombre de mesures parmi les candidats présents : c'est lui
+    // qui dit à quel point la comparaison sera inégale.
+    const minimum = candidatesQuota(pool, Number.MAX_SAFE_INTEGER);
     return {
-      vivier,
+      complet,
       presents: presents.size,
       // Candidats qui n'ont aucune mesure dans ces thèmes : ils ne seront pas
       // du tout comparés, ce que rien n'indiquait auparavant.
       absents: CANDIDATES.length - presents.size,
-      parCandidat,
-      cartes: parCandidat * presents.size,
+      minimum,
+      cartes: complet ? candidatesQuota(pool, QUOTA_PAR_CANDIDAT) * presents.size : pool.length,
     };
   }, [selected]);
 
@@ -97,7 +94,7 @@ export function ThemeSelectScreen({
 
   const thinDeck = useMemo(() => {
     if (selected.size === 0 || tirage.presents === 0) return null;
-    if (tirage.parCandidat >= MIN_PAR_CANDIDAT && tirage.absents === 0) return null;
+    if (tirage.minimum >= MIN_PAR_CANDIDAT && tirage.absents === 0) return null;
     return tirage;
   }, [selected, tirage]);
 
@@ -106,7 +103,8 @@ export function ThemeSelectScreen({
       <ScreenHeader title="Choisis tes thèmes" onBack={onBack} />
       <View style={styles.header}>
         <Text style={styles.subtitle}>
-          Swipe tout, ou concentre-toi sur ce qui t’intéresse. Pendant le swipe, le bouton
+          Swipe tout, ou concentre-toi sur ce qui t’intéresse : une sélection de thèmes te
+          donne TOUTES leurs propositions, pas un échantillon. Pendant le swipe, le bouton
           « super like » te permet de dire ce qui compte vraiment pour toi.
         </Text>
         <Pressable
@@ -201,10 +199,11 @@ export function ThemeSelectScreen({
                   {thinDeck.absents > 1 ? 's' : ''}.{' '}
                 </>
               )}
-              {thinDeck.parCandidat < MIN_PAR_CANDIDAT && (
+              {thinDeck.minimum < MIN_PAR_CANDIDAT && (
                 <>
-                  {thinDeck.parCandidat} proposition{thinDeck.parCandidat > 1 ? 's' : ''} par
-                  candidat seulement : à égalité, le classement ne pourra pas départager.{' '}
+                  Le candidat le moins représenté n’a que {thinDeck.minimum} proposition
+                  {thinDeck.minimum > 1 ? 's' : ''} sur ces thèmes : son pourcentage ne
+                  reposera presque sur rien.{' '}
                 </>
               )}
               Le résultat sera très approximatif.
