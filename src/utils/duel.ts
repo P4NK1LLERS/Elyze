@@ -51,7 +51,7 @@ const TAILLE = 4 + CANDIDATES.length + 1;
 // comparaison entre deux versions de l'app dont les propositions diffèrent :
 // les pourcentages ne porteraient plus sur les mêmes mesures, et l'écart
 // affiché mesurerait la mise à jour, pas le désaccord.
-export function empreinteCourte(): number {
+function empreinteCourte(): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < CATALOG_FINGERPRINT.length; i++) {
     h ^= CATALOG_FINGERPRINT.charCodeAt(i);
@@ -178,7 +178,7 @@ export function decoderDuel(code: string): DuelResultat | DuelErreur {
 // `elyze://` est déclaré dans app.json. Quand l'app n'est pas installée, rien
 // ne s'ouvre : c'est acceptable, un duel suppose deux joueurs équipés, et
 // l'écran affiche le code en clair juste en dessous pour tous les autres cas.
-export const DUEL_SCHEME = 'elyze';
+const DUEL_SCHEME = 'elyze';
 
 export function duelUrl(code: string): string {
   return `${DUEL_SCHEME}://d?c=${code}`;

@@ -29,7 +29,7 @@ const avatarSize = (rank: number) => AVATAR_SIZES[rank] ?? AVATAR_SIZES[3];
 // L'intervalle est assez long pour qu'on ait le temps de lire un nom, assez
 // court pour ne pas faire attendre : on tient sur une seconde et demie pour
 // les trois.
-export const PODIUM_STEP_MS = 480;
+const PODIUM_STEP_MS = 480;
 
 // Retard d'une place donnée par rapport au début du dévoilement. Exporté :
 // l'écran de résultat s'en sert pour faire coïncider la vibration, les

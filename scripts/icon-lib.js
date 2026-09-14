@@ -92,7 +92,7 @@ class Canvas {
     // une seule fois, à l'écriture.
     // Transformation appliquée à toute forme dessinée ensuite. Sert au
     // recentrage optique et à la mise à l'échelle automatiques, mesurés puis
-    // rejoués (voir icon-measure.js).
+    // rejoués (voir icon-fit.js).
     this.t = { dx: 0, dy: 0, scale: 1, ox: width / 2, oy: height / 2 };
     const n = width * height;
     this.r = new Float64Array(n);

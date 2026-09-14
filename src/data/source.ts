@@ -3,9 +3,15 @@ import { Proposal } from '../types';
 
 // Poligraph recense les mesures des candidats et les rattache à leur document
 // d'origine. La licence des données (AGPL-3.0) impose de citer la source :
-// cette mention apparaît sur l'accueil, l'écran de résultat et "Comment ça
-// marche", et chaque carte renvoie à la fiche de sa propre mesure.
-export const POLIGRAPH_NAME = 'Poligraph';
+// cette mention apparaît sur l'accueil, l'écran de résultat et « Comment ça
+// marche ».
+//
+// AUCUNE CARTE NE RENVOIE À LA FICHE DE SA PROPRE MESURE, et ce n'est pas un
+// oubli : l'adresse d'une fiche Poligraph commence par le nom de son auteur,
+// si bien qu'un tel lien trahirait le paquet d'un simple appui long. Le lien
+// par mesure a donc été retiré, et la fonction qui le fabriquait avec lui. La
+// provenance reste affichée, mais en texte (voir `proposalProvenance`).
+const POLIGRAPH_NAME = 'Poligraph';
 export const POLIGRAPH_SOURCE_URL = 'https://poligraph.fr/elections/presidentielle-2027';
 export const POLIGRAPH_LICENCE = 'AGPL-3.0, réutilisation libre avec mention de la source';
 
@@ -19,12 +25,6 @@ export function openUrl(url: string): void {
 
 export function openSourceUrl(): void {
   openUrl(POLIGRAPH_SOURCE_URL);
-}
-
-// Lien le plus précis disponible pour une proposition : sa fiche Poligraph si
-// on l'a, sinon le document d'origine, sinon le comparateur complet.
-export function proposalSourceUrl(proposal: Proposal): string {
-  return proposal.detailUrl ?? proposal.sourceUrl ?? POLIGRAPH_SOURCE_URL;
 }
 
 // Ligne de provenance affichée sous la proposition : d'où vient la mesure, et

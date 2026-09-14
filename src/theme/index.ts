@@ -126,7 +126,7 @@ export const ACCENT_PRESETS: AccentPreset[] = [
 
 export const DEFAULT_ACCENT_ID = ACCENT_PRESETS[0].id;
 
-export function getAccentPreset(id: string): AccentPreset {
+function getAccentPreset(id: string): AccentPreset {
   return ACCENT_PRESETS.find((a) => a.id === id) ?? ACCENT_PRESETS[0];
 }
 

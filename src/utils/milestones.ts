@@ -57,7 +57,7 @@ export const CARTES_PAR_JALON = 40;
 
 // En dessous, aucun palier : une partie de moins de vingt cartes se finit
 // avant qu'un classement provisoire ait un sens à annoncer.
-export const MIN_TOTAL_POUR_JALON = 20;
+const MIN_TOTAL_POUR_JALON = 20;
 
 export function milestonesFor(total: number): Milestone[] {
   if (total < MIN_TOTAL_POUR_JALON) return [];
